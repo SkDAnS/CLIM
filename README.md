@@ -1,1 +1,1 @@
-# CLIM
+# CLIM (Command Line Instant Messenger)
