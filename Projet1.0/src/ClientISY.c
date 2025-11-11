@@ -4,6 +4,7 @@
  * - Chaque utilisateur a un symbole UTF-8 unique
  * - Génération stable selon login/IP
  * - Dialogue fluide et fusion totale
+ * - Détection automatique du serveur par broadcast UDP
  */
 
 #include "../include/Commun.h"
@@ -18,6 +19,10 @@
 /* ----- CONFIGURATION ----- */
 /* Mettre à 1 pour activer la reconnaissance IP automatique */
 #define ENABLE_IP_RECOG 1
+#define BROADCAST_PORT 9999  // Port pour la découverte serveur
+
+// 🔹 Configuration du serveur
+static char SERVER_IP[TAILLE_IP] = "127.0.0.1"; // Par défaut localhost
 
 static char login[TAILLE_LOGIN];
 static int sockfd_client;
@@ -60,6 +65,78 @@ void get_local_ip(char* buffer, size_t size) {
 #endif
     strncpy(buffer, "127.0.0.1", size - 1);
     buffer[size-1] = '\0';
+}
+
+/* 🔹 NOUVELLE FONCTION : Découverte automatique du serveur */
+int decouvrir_serveur(char* ip_serveur, size_t size) {
+    printf("[DÉCOUVERTE] Recherche du serveur sur le réseau...\n");
+    
+    int sock_broadcast = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock_broadcast < 0) {
+        perror("socket broadcast");
+        return -1;
+    }
+
+    // Activer le broadcast
+    int broadcast_enable = 1;
+    if (setsockopt(sock_broadcast, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable)) < 0) {
+        perror("setsockopt broadcast");
+        close(sock_broadcast);
+        return -1;
+    }
+
+    // Configurer le timeout
+    struct timeval tv;
+    tv.tv_sec = 3;  // 3 secondes de timeout
+    tv.tv_usec = 0;
+    setsockopt(sock_broadcast, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    // Adresse de broadcast
+    struct sockaddr_in broadcast_addr;
+    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_port = htons(BROADCAST_PORT);
+    broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+    // Message de découverte
+    const char* message = "SERVER_DISCOVERY";
+    
+    // Envoyer la requête broadcast
+    if (sendto(sock_broadcast, message, strlen(message), 0,
+               (struct sockaddr*)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
+        perror("sendto broadcast");
+        close(sock_broadcast);
+        return -1;
+    }
+
+    printf("[DÉCOUVERTE] Broadcast envoyé, attente de réponse...\n");
+
+    // Attendre la réponse
+    char buffer[256];
+    struct sockaddr_in server_addr;
+    socklen_t addr_len = sizeof(server_addr);
+    
+    int bytes = recvfrom(sock_broadcast, buffer, sizeof(buffer) - 1, 0,
+                         (struct sockaddr*)&server_addr, &addr_len);
+    
+    if (bytes > 0) {
+        buffer[bytes] = '\0';
+        
+        // Vérifier que c'est bien une réponse du serveur
+        if (strncmp(buffer, "SERVER_HERE:", 12) == 0) {
+            char* server_ip = buffer + 12;
+            strncpy(ip_serveur, server_ip, size - 1);
+            ip_serveur[size - 1] = '\0';
+            
+            printf("[DÉCOUVERTE] ✓ Serveur trouvé : %s\n", ip_serveur);
+            close(sock_broadcast);
+            return 0;
+        }
+    }
+
+    printf("[DÉCOUVERTE] ✗ Aucun serveur trouvé (timeout)\n");
+    close(sock_broadcast);
+    return -1;
 }
 
 /* Petit hachage stable pour login/IP */
@@ -125,7 +202,7 @@ void creer_groupe() {
 
     struct struct_message msg, rep;
     construire_message(&msg, ORDRE_CRE, login, nom);
-    envoyer_message(sockfd_client, &msg, "127.0.0.1", PORT_SERVEUR);
+    envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
     char ip[TAILLE_IP];
     int port;
@@ -140,7 +217,7 @@ void creer_groupe() {
 void lister_groupes() {
     struct struct_message msg, rep;
     construire_message(&msg, ORDRE_LST, login, "");
-    envoyer_message(sockfd_client, &msg, "127.0.0.1", PORT_SERVEUR);
+    envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
     char ip[TAILLE_IP];
     int port;
@@ -157,7 +234,7 @@ void rejoindre_groupe() {
 
     struct struct_message msg, rep;
     construire_message(&msg, ORDRE_JOIN, login, nom);
-    envoyer_message(sockfd_client, &msg, "127.0.0.1", PORT_SERVEUR);
+    envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
     char ip[TAILLE_IP];
     int port;
@@ -216,7 +293,7 @@ void fusionner_groupes() {
     }
 
     if (!groupes[g1].actif || !groupes[g2].actif) {
-        printf("[ERREUR] L’un des groupes sélectionnés est inactif.\n");
+        printf("[ERREUR] L'un des groupes sélectionnés est inactif.\n");
         return;
     }
 
@@ -236,7 +313,7 @@ void fusionner_groupes() {
     snprintf(data, sizeof(data), "%s:%s:%s", groupes[g1].nom, groupes[g2].nom, nouveau_nom);
     struct struct_message msg;
     construire_message(&msg, ORDRE_FUS, login, data);
-    envoyer_message(sockfd_client, &msg, "127.0.0.1", PORT_SERVEUR);
+    envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
     printf("[INFO] Demande de fusion envoyée au serveur...\n");
     printf("[INFO] Tous les anciens groupes seront supprimés.\n");
@@ -325,10 +402,25 @@ void dialoguer() {
 
 /* ====================== MAIN ====================== */
 
-/* ====================== MAIN ====================== */
-
 int main(void) {
     printf("=== CLIENT ISY ===\n");
+
+    // 🔹 Tentative de découverte automatique du serveur
+    if (decouvrir_serveur(SERVER_IP, sizeof(SERVER_IP)) < 0) {
+        // Si échec, demander manuellement
+        printf("\n⚠️  Découverte automatique échouée\n");
+        printf("Entrez l'IP du serveur manuellement (Entrée = localhost) : ");
+        char buffer[TAILLE_IP];
+        if (fgets(buffer, sizeof(buffer), stdin)) {
+            nettoyer_chaine(buffer);
+            if (strlen(buffer) > 0) {
+                strncpy(SERVER_IP, buffer, TAILLE_IP - 1);
+                SERVER_IP[TAILLE_IP - 1] = '\0';
+            }
+        }
+    }
+    
+    printf("📡 Connexion au serveur : %s\n\n", SERVER_IP);
 
     sockfd_client = creer_socket_udp();
     if (sockfd_client < 0) return EXIT_FAILURE;

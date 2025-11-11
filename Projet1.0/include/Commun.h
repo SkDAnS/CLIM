@@ -103,5 +103,8 @@ void construire_message(struct struct_message* msg, const char* ordre, const cha
 void nettoyer_chaine(char* chaine);
 void jouer_son_notification();
 int trouver_groupe(Groupe groupes[], int nb_groupes, const char* nom);
+void get_local_ip(char* buffer, size_t size);
+
+
 
 #endif
