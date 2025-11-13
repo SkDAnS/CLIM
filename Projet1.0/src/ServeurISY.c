@@ -16,6 +16,7 @@
 #include <ifaddrs.h>
 #include <string.h>
 #include <stdio.h>
+#include <pthread.h>
 
 #define BROADCAST_PORT 9999
 
@@ -55,12 +56,16 @@ void* thread_broadcast(void* arg) {
             printf("[BROADCAST] Découverte reçue de %s\n", ip_client);
 
             char reponse[256];
-            snprintf(reponse, sizeof(reponse), "SERVER_HERE:%s", ip_client);
-
-            // On renvoie notre IP locale si possible
             char ip_locale[TAILLE_IP];
-            get_local_ip(ip_locale, sizeof(ip_locale));
-            snprintf(reponse, sizeof(reponse), "SERVER_HERE:%s", ip_locale);
+get_local_ip(ip_locale, sizeof(ip_locale));
+
+snprintf(reponse, sizeof(reponse), "SERVER_HERE:%s", ip_locale);
+
+sendto(sockfd_broadcast, reponse, strlen(reponse), 0,
+       (struct sockaddr*)&addr, sizeof(addr));
+
+printf("[BROADCAST] Réponse envoyée : %s\n", ip_locale);
+
 
             sendto(sockfd_broadcast, reponse, strlen(reponse), 0,
                    (struct sockaddr*)&addr, sizeof(addr));
@@ -148,7 +153,10 @@ void traiter_connexion_groupe(const char* nom_groupe, const char* login,
     }
 
     char info[TAILLE_TEXTE];
-    snprintf(info, sizeof(info), "127.0.0.1:%d", groupes[idx].port);
+char ip_locale[TAILLE_IP];
+get_local_ip(ip_locale, sizeof(ip_locale));
+
+snprintf(info, sizeof(info), "%s:%d", ip_locale, groupes[idx].port);
     construire_message(&msg, ORDRE_OK, "Serveur", info);
     envoyer_message(sockfd_serveur, &msg, ip_client, port_client);
 
@@ -233,29 +241,28 @@ void terminer_tous_groupes() {
 
 /* Fonction utilitaire pour récupérer l'IP locale du serveur */
 void get_local_ip(char* buffer, size_t size) {
-    struct ifaddrs *ifaddr, *ifa;
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        strncpy(buffer, "127.0.0.1", size - 1);
-        buffer[size - 1] = '\0';
-        return;
-    }
-
-    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == NULL) continue;
-        if (ifa->ifa_addr->sa_family == AF_INET &&
-            strcmp(ifa->ifa_name, "lo") != 0) {
-            struct sockaddr_in *sa = (struct sockaddr_in *) ifa->ifa_addr;
-            if (inet_ntop(AF_INET, &sa->sin_addr, buffer, size) != NULL) {
-                freeifaddrs(ifaddr);
-                return;
+    FILE* f = fopen("/etc/resolv.conf", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "nameserver", 10) == 0) {
+                char ip[64];
+                if (sscanf(line, "nameserver %63s", ip) == 1) {
+                    strncpy(buffer, ip, size - 1);
+                    buffer[size - 1] = '\0';
+                    fclose(f);
+                    return;   // OK trouvé → on renvoie l'IP Windows
+                }
             }
         }
+        fclose(f);
     }
-    freeifaddrs(ifaddr);
+
+    // fallback
     strncpy(buffer, "127.0.0.1", size - 1);
     buffer[size - 1] = '\0';
 }
+
 
 /* ========================== MAIN ========================== */
 int main() {

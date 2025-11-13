@@ -43,29 +43,28 @@ static int nb_groupes_rejoints = 0;
 
 void get_local_ip(char* buffer, size_t size) {
 #if ENABLE_IP_RECOG
-    struct ifaddrs *ifaddr, *ifa;
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        strncpy(buffer, "127.0.0.1", size - 1);
-        buffer[size-1] = '\0';
-        return;
-    }
-    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == NULL) continue;
-        if (ifa->ifa_addr->sa_family == AF_INET &&
-            strcmp(ifa->ifa_name, "lo") != 0) {
-            struct sockaddr_in *sa = (struct sockaddr_in *) ifa->ifa_addr;
-            if (inet_ntop(AF_INET, &sa->sin_addr, buffer, size) != NULL) {
-                freeifaddrs(ifaddr);
-                return;
+    FILE* f = fopen("/etc/resolv.conf", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "nameserver", 10) == 0) {
+                char ip[64];
+                if (sscanf(line, "nameserver %63s", ip) == 1) {
+                    strncpy(buffer, ip, size - 1);
+                    buffer[size - 1] = '\0';
+                    fclose(f);
+                    return;
+                }
             }
         }
+        fclose(f);
     }
-    freeifaddrs(ifaddr);
 #endif
+    // fallback
     strncpy(buffer, "127.0.0.1", size - 1);
-    buffer[size-1] = '\0';
+    buffer[size - 1] = '\0';
 }
+
 
 /* 🔹 NOUVELLE FONCTION : Découverte automatique du serveur */
 int decouvrir_serveur(char* ip_serveur, size_t size) {
