@@ -17,7 +17,7 @@
 #include <string.h>
 #include <pthread.h>
 
-#define BROADCAST_PORT 9999
+#define BROADCAST_PORT 8005
 
 static Groupe groupes[MAX_GROUPES];
 static int nb_groupes = 0;

@@ -1,11 +1,10 @@
 /*
- * ClientISY.c – Version finale AUTOMATIQUE (LAN + WSL)
- * -----------------------------------------------------
- * - Découverte automatique du serveur via broadcast
- * - Récupère automatiquement l’IP du serveur (IP Windows)
- * - Fonctionne avec portproxy Windows → WSL
- * - Aucune saisie d’adresse IP
- * - Dialogue, création de groupes, etc.
+ * ClientISY.c
+ * Version finale : Avatars automatiques entre U+2600 et U+26FF (☀ → ⛿)
+ * - Chaque utilisateur a un symbole UTF-8 unique
+ * - Génération stable selon login/IP
+ * - Dialogue fluide et fusion totale
+ * - Détection automatique du serveur par broadcast UDP
  */
 
 #include "../include/Commun.h"
@@ -16,11 +15,14 @@
 #include <netinet/in.h>
 #include <locale.h>
 #include <wchar.h>
-#include <signal.h>
 
-/* ---------------- CONFIG ---------------- */
-#define BROADCAST_PORT 9999
-static char SERVER_IP[TAILLE_IP] = "127.0.0.1";
+/* ----- CONFIGURATION ----- */
+/* Mettre à 1 pour activer la reconnaissance IP automatique */
+#define ENABLE_IP_RECOG 1
+#define BROADCAST_PORT 8005  // Port pour la découverte serveur
+
+// 🔹 Configuration du serveur
+static char SERVER_IP[TAILLE_IP] = "127.0.0.1"; // Par défaut localhost
 
 static char login[TAILLE_LOGIN];
 static int sockfd_client;
@@ -37,82 +39,106 @@ typedef struct {
 static GroupeClient groupes[MAX_GROUPES];
 static int nb_groupes_rejoints = 0;
 
+/* ====================== UTILITAIRES ====================== */
 
-/* ============================================================
-   SIGNAL HANDLER
-   ============================================================ */
-void gestionnaire_signal(int sig) {
-    if (sig == SIGINT) {
-        printf("\n[CLIENT] Fermeture...\n");
-        continuer = 0;
-        close(sockfd_client);
-        exit(0);
+void get_local_ip(char* buffer, size_t size) {
+#if ENABLE_IP_RECOG
+    FILE* f = fopen("/etc/resolv.conf", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "nameserver", 10) == 0) {
+                char ip[64];
+                if (sscanf(line, "nameserver %63s", ip) == 1) {
+                    strncpy(buffer, ip, size - 1);
+                    buffer[size - 1] = '\0';
+                    fclose(f);
+                    return;
+                }
+            }
+        }
+        fclose(f);
     }
+#endif
+    // fallback
+    strncpy(buffer, "127.0.0.1", size - 1);
+    buffer[size - 1] = '\0';
 }
 
 
-/* ============================================================
-   DÉCOUVERTE AUTOMATIQUE DU SERVEUR
-   ============================================================ */
+/* 🔹 NOUVELLE FONCTION : Découverte automatique du serveur */
 int decouvrir_serveur(char* ip_serveur, size_t size) {
-    printf("[DÉCOUVERTE] Recherche du serveur sur le LAN...\n");
-
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        perror("socket");
+    printf("[DÉCOUVERTE] Recherche du serveur sur le réseau...\n");
+    
+    int sock_broadcast = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock_broadcast < 0) {
+        perror("socket broadcast");
         return -1;
     }
 
-    int yes = 1;
-    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
+    // Activer le broadcast
+    int broadcast_enable = 1;
+    if (setsockopt(sock_broadcast, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable)) < 0) {
+        perror("setsockopt broadcast");
+        close(sock_broadcast);
+        return -1;
+    }
 
-    struct timeval tv = {3, 0};
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    // Configurer le timeout
+    struct timeval tv;
+    tv.tv_sec = 3;  // 3 secondes de timeout
+    tv.tv_usec = 0;
+    setsockopt(sock_broadcast, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(BROADCAST_PORT);
-    addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    // Adresse de broadcast
+    struct sockaddr_in broadcast_addr;
+    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_port = htons(BROADCAST_PORT);
+    broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 
-    const char* msg = "SERVER_DISCOVERY";
-    sendto(sock, msg, strlen(msg), 0, (struct sockaddr*)&addr, sizeof(addr));
+    // Message de découverte
+    const char* message = "SERVER_DISCOVERY";
+    
+    // Envoyer la requête broadcast
+    if (sendto(sock_broadcast, message, strlen(message), 0,
+               (struct sockaddr*)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
+        perror("sendto broadcast");
+        close(sock_broadcast);
+        return -1;
+    }
 
-    printf("[DÉCOUVERTE] Broadcast envoyé…\n");
+    printf("[DÉCOUVERTE] Broadcast envoyé, attente de réponse...\n");
 
+    // Attendre la réponse
     char buffer[256];
-    struct sockaddr_in saddr;
-    socklen_t slen = sizeof(saddr);
-
-    int bytes = recvfrom(sock, buffer, sizeof(buffer)-1, 0,
-                         (struct sockaddr*)&saddr, &slen);
-
-    close(sock);
-
-    if (bytes <= 0) {
-        printf("[DÉCOUVERTE] ✗ Aucun serveur trouvé\n");
-        return -1;
+    struct sockaddr_in server_addr;
+    socklen_t addr_len = sizeof(server_addr);
+    
+    int bytes = recvfrom(sock_broadcast, buffer, sizeof(buffer) - 1, 0,
+                         (struct sockaddr*)&server_addr, &addr_len);
+    
+    if (bytes > 0) {
+        buffer[bytes] = '\0';
+        
+        // Vérifier que c'est bien une réponse du serveur
+        if (strncmp(buffer, "SERVER_HERE:", 12) == 0) {
+            char* server_ip = buffer + 12;
+            strncpy(ip_serveur, server_ip, size - 1);
+            ip_serveur[size - 1] = '\0';
+            
+            printf("[DÉCOUVERTE] ✓ Serveur trouvé : %s\n", ip_serveur);
+            close(sock_broadcast);
+            return 0;
+        }
     }
 
-    buffer[bytes] = '\0';
-
-    if (strncmp(buffer, "SERVER_HERE:", 12) != 0)
-        return -1;
-
-    char* ip = buffer + 12;
-    while (*ip == ' ' || *ip == '\n' || *ip == '\r' || *ip == '\t')
-        ip++;
-
-    strncpy(ip_serveur, ip, size - 1);
-    ip_serveur[size - 1] = '\0';
-
-    printf("[DÉCOUVERTE] ✓ Serveur trouvé : %s\n\n", ip_serveur);
-    return 0;
+    printf("[DÉCOUVERTE] ✗ Aucun serveur trouvé (timeout)\n");
+    close(sock_broadcast);
+    return -1;
 }
 
-
-/* ============================================================
-   AVATARS
-   ============================================================ */
+/* Petit hachage stable pour login/IP */
 unsigned long simple_hash(const char* str) {
     unsigned long hash = 5381;
     int c;
@@ -121,42 +147,57 @@ unsigned long simple_hash(const char* str) {
     return hash;
 }
 
+/* Avatar UTF-8 entre U+2600 et U+26FF */
 const char* get_avatar(const char* login, const char* ip) {
     static char buffer[8];
     setlocale(LC_CTYPE, "");
 
-    unsigned long base_unicode = 0x2600;
-    unsigned long range = 0x26FF - 0x2600 + 1;
-    unsigned long hash_value = simple_hash(ip);
+    unsigned long base_unicode = 0x2600; // ☀
+    unsigned long range = 0x26FF - 0x2600 + 1; // 256 symboles
+    unsigned long hash_value;
+
+#if ENABLE_IP_RECOG
+    if (ip && strlen(ip) > 0)
+        hash_value = simple_hash(ip);
+    else
+        hash_value = simple_hash(login);
+#else
+    hash_value = simple_hash(login);
+#endif
 
     unsigned long codepoint = base_unicode + (hash_value % range);
     snprintf(buffer, sizeof(buffer), "%lc", (wint_t)codepoint);
     return buffer;
 }
 
+void gestionnaire_signal(int sig) {
+    if (sig == SIGINT) {
+        printf("\n[CLIENT] CTRL-C...\n");
+        continuer = 0;
+    }
+}
 
-/* ============================================================
-   MENU
-   ============================================================ */
+/* ====================== MENU ====================== */
+
 void afficher_menu() {
-    printf("\n=== MENU === (Groupe : %s)\n", groupe_actuel);
-    printf("0 - Créer groupe\n");
+    printf("\n=== MENU === (Groupe actuel : %s)\n", groupe_actuel);
+    printf("0 - Creer groupe\n");
     printf("1 - Rejoindre groupe\n");
     printf("2 - Lister groupes\n");
     printf("3 - Dialoguer\n");
-    printf("4 - Quitter\n");
-    printf("Choix : ");
+    printf("4 - Fusionner groupes\n");
+    printf("5 - Quitter\n");
+    printf("Choix: ");
 }
 
+/* ====================== ACTIONS ====================== */
 
-/* ============================================================
-   ACTIONS
-   ============================================================ */
 void creer_groupe() {
     char nom[TAILLE_NOM_GROUPE];
     printf("\nNom du groupe: ");
-    fgets(nom, sizeof(nom), stdin);
+    if (fgets(nom, TAILLE_NOM_GROUPE, stdin) == NULL) return;
     nettoyer_chaine(nom);
+    if (strlen(nom) == 0) return;
 
     struct struct_message msg, rep;
     construire_message(&msg, ORDRE_CRE, login, nom);
@@ -164,10 +205,9 @@ void creer_groupe() {
 
     char ip[TAILLE_IP];
     int port;
-
     if (recevoir_message(sockfd_client, &rep, ip, &port) >= 0) {
-        if (!strcmp(rep.Ordre, ORDRE_OK))
-            printf("[OK] Groupe créé.\n");
+        if (strcmp(rep.Ordre, ORDRE_OK) == 0)
+            printf("[OK] Groupe '%s' créé\n", nom);
         else
             printf("[ERREUR] %s\n", rep.Texte);
     }
@@ -180,73 +220,139 @@ void lister_groupes() {
 
     char ip[TAILLE_IP];
     int port;
-
     if (recevoir_message(sockfd_client, &rep, ip, &port) >= 0)
-        printf("--- Groupes ---\n%s\n", rep.Texte);
+        printf("\n--- Groupes ---\n%s\n", rep.Texte);
 }
 
 void rejoindre_groupe() {
     char nom[TAILLE_NOM_GROUPE];
     printf("\nNom du groupe: ");
-    fgets(nom, sizeof(nom), stdin);
+    if (fgets(nom, TAILLE_NOM_GROUPE, stdin) == NULL) return;
     nettoyer_chaine(nom);
+    if (strlen(nom) == 0) return;
 
     struct struct_message msg, rep;
     construire_message(&msg, ORDRE_JOIN, login, nom);
     envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
-    char ipg[TAILLE_IP];
-    int portg;
+    char ip[TAILLE_IP];
+    int port;
+    if (recevoir_message(sockfd_client, &rep, ip, &port) < 0) return;
 
-    if (recevoir_message(sockfd_client, &rep, ipg, &portg) < 0)
-        return;
-
-    if (!strcmp(rep.Ordre, ORDRE_ERR)) {
+    if (strcmp(rep.Ordre, ORDRE_ERR) == 0) {
         printf("[ERREUR] %s\n", rep.Texte);
         return;
     }
 
-    char ip_grp[TAILLE_IP];
-    int port_grp;
-    sscanf(rep.Texte, "%[^:]:%d", ip_grp, &port_grp);
+    char ip_groupe[TAILLE_IP];
+    int port_groupe;
+    if (sscanf(rep.Texte, "%[^:]:%d", ip_groupe, &port_groupe) != 2) return;
 
-    int idx = nb_groupes_rejoints++;
-    strncpy(groupes[idx].nom, nom, sizeof(groupes[idx].nom));
-    strncpy(groupes[idx].ip, ip_grp, sizeof(groupes[idx].ip));
-    groupes[idx].port = port_grp;
-    groupes[idx].actif = 1;
+    printf("[OK] Connexion à '%s' (Port: %d)\n", nom, port_groupe);
 
-    struct struct_message cnx;
-    construire_message(&cnx, ORDRE_CON, login, "");
-    envoyer_message(sockfd_client, &cnx, groupes[idx].ip, groupes[idx].port);
+    int idx = nb_groupes_rejoints;
+    if (idx < MAX_GROUPES) {
+        strncpy(groupes[idx].nom, nom, TAILLE_NOM_GROUPE - 1);
+        strncpy(groupes[idx].ip, ip_groupe, TAILLE_IP - 1);
+        groupes[idx].port = port_groupe;
+        groupes[idx].actif = 1;
+        nb_groupes_rejoints++;
+    }
 
-    strncpy(groupe_actuel, nom, sizeof(groupe_actuel));
-    printf("[INFO] Connecté au groupe.\n");
+    struct struct_message msg_con;
+    construire_message(&msg_con, ORDRE_CON, login, "");
+    envoyer_message(sockfd_client, &msg_con, groupes[idx].ip, groupes[idx].port);
+    printf("[INFO] Connecté au groupe '%s'\n", nom);
+
+    strncpy(groupe_actuel, nom, TAILLE_NOM_GROUPE - 1);
 }
 
+/* ====================== FUSION TOTALE ====================== */
 
-/* ============================================================
-   DIALOGUE
-   ============================================================ */
-void dialoguer() {
-    if (nb_groupes_rejoints == 0) {
-        printf("Aucun groupe.\n");
+void fusionner_groupes() {
+    if (nb_groupes_rejoints < 2) {
+        printf("\n[ERREUR] Vous devez avoir rejoint au moins deux groupes pour les fusionner.\n");
         return;
     }
 
-    printf("\n--- Vos groupes ---\n");
+    printf("\n--- Mes groupes ---\n");
+    for (int i = 0; i < nb_groupes_rejoints; i++)
+        if (groupes[i].actif) printf("%d. %s\n", i, groupes[i].nom);
+
+    int g1, g2;
+    printf("Groupe 1 (à garder): ");
+    if (scanf("%d", &g1) != 1) { while (getchar() != '\n'); return; }
+    printf("Groupe 2 (à fusionner): ");
+    if (scanf("%d", &g2) != 1) { while (getchar() != '\n'); return; }
+    while (getchar() != '\n');
+
+    if (g1 < 0 || g1 >= nb_groupes_rejoints || g2 < 0 || g2 >= nb_groupes_rejoints) {
+        printf("[ERREUR] Indices invalides.\n");
+        return;
+    }
+
+    if (!groupes[g1].actif || !groupes[g2].actif) {
+        printf("[ERREUR] L'un des groupes sélectionnés est inactif.\n");
+        return;
+    }
+
+    char nouveau_nom[TAILLE_NOM_GROUPE];
+snprintf(nouveau_nom, sizeof(nouveau_nom), "%.*s_%.*s",
+         (int)(sizeof(nouveau_nom)/2 - 2), groupes[g1].nom,
+         (int)(sizeof(nouveau_nom)/2 - 2), groupes[g2].nom);
+    nouveau_nom[sizeof(nouveau_nom) - 1] = '\0';
+
+    printf("Entrez le nom du groupe fusionné (par défaut: %s): ", nouveau_nom);
+    char saisie[TAILLE_NOM_GROUPE];
+    if (fgets(saisie, sizeof(saisie), stdin)) {
+        nettoyer_chaine(saisie);
+        if (strlen(saisie) > 0)
+            strncpy(nouveau_nom, saisie, TAILLE_NOM_GROUPE - 1);
+    }
+
+    char data[TAILLE_TEXTE];
+    snprintf(data, sizeof(data), "%s:%s:%s", groupes[g1].nom, groupes[g2].nom, nouveau_nom);
+    struct struct_message msg;
+    construire_message(&msg, ORDRE_FUS, login, data);
+    envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
+
+    printf("[INFO] Demande de fusion envoyée au serveur...\n");
+    printf("[INFO] Tous les anciens groupes seront supprimés.\n");
+    printf("[INFO] Votre groupe actuel est désormais 'Aucun'.\n");
+
+    for (int i = 0; i < nb_groupes_rejoints; i++)
+        groupes[i].actif = 0;
+
+    nb_groupes_rejoints = 0;
+    strncpy(groupe_actuel, "Aucun", TAILLE_NOM_GROUPE - 1);
+}
+
+/* ====================== DIALOGUE ====================== */
+
+void dialoguer() {
+    if (nb_groupes_rejoints == 0) {
+        printf("\nAucun groupe rejoint\n");
+        return;
+    }
+
+    printf("\n--- Mes groupes ---\n");
     for (int i = 0; i < nb_groupes_rejoints; i++)
         if (groupes[i].actif)
             printf("%d. %s\n", i, groupes[i].nom);
 
-    printf("\nNuméro: ");
+    printf("Numero: ");
     int choix;
-    scanf("%d", &choix);
+    if (scanf("%d", &choix) != 1) {
+        while (getchar() != '\n');
+        return;
+    }
     while (getchar() != '\n');
+    if (choix < 0 || choix >= nb_groupes_rejoints || !groupes[choix].actif) return;
 
-    printf("\n[DIALOGUE] Groupe : %s\n", groupes[choix].nom);
+    printf("\n[DIALOGUE] Groupe: %s\n", groupes[choix].nom);
+    printf("(Tape 'quit' pour quitter)\n\n");
 
-    fd_set fds;
+    fd_set readfds;
     struct timeval tv;
     struct struct_message msg;
     char buffer[TAILLE_TEXTE];
@@ -254,66 +360,127 @@ void dialoguer() {
     int port_src;
 
     while (1) {
-        FD_ZERO(&fds);
-        FD_SET(sockfd_client, &fds);
-        FD_SET(STDIN_FILENO, &fds);
-
+        FD_ZERO(&readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+        FD_SET(sockfd_client, &readfds);
         tv.tv_sec = 0;
         tv.tv_usec = 200000;
 
         int maxfd = (sockfd_client > STDIN_FILENO) ? sockfd_client : STDIN_FILENO;
-        select(maxfd + 1, &fds, NULL, NULL, &tv);
+        int activity = select(maxfd + 1, &readfds, NULL, NULL, &tv);
+        if (activity < 0 && errno != EINTR) continue;
 
-        if (FD_ISSET(sockfd_client, &fds)) {
+        /* Réception réseau (affiche TOUS les messages, y compris les tiens) */
+        if (FD_ISSET(sockfd_client, &readfds)) {
             if (recevoir_message(sockfd_client, &msg, ip_src, &port_src) >= 0) {
-                if (!strcmp(msg.Ordre, ORDRE_MES))
-                    printf("[%s] %s: %s\n",
-                           get_avatar(msg.Emetteur, ip_src),
+                if (strcmp(msg.Ordre, ORDRE_MES) == 0) {
+                    printf("[%s] %s: %s\n", get_avatar(msg.Emetteur, ip_src),
                            msg.Emetteur, msg.Texte);
+                    fflush(stdout);
+                } else if (strcmp(msg.Ordre, ORDRE_INFO) == 0) {
+                    printf("[INFO] %s\n", msg.Texte);
+                    fflush(stdout);
+                }
             }
         }
 
-        if (FD_ISSET(STDIN_FILENO, &fds)) {
-            fgets(buffer, sizeof(buffer), stdin);
+        /* Envoi utilisateur */
+        if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            if (fgets(buffer, sizeof(buffer), stdin) == NULL) break;
             nettoyer_chaine(buffer);
+            if (strlen(buffer) == 0) continue;
+            if (strcmp(buffer, "quit") == 0) break;
 
-            if (!strcmp(buffer, "quit"))
-                break;
-
+            // Envoi du message (affichage géré par réception)
             construire_message(&msg, ORDRE_MES, login, buffer);
-            envoyer_message(sockfd_client, &msg,
-                            groupes[choix].ip, groupes[choix].port);
+            envoyer_message(sockfd_client, &msg, groupes[choix].ip, groupes[choix].port);
         }
     }
+
+    printf("\n[FIN DIALOGUE] Retour au menu principal.\n");
 }
 
 
-/* ============================================================
-   MAIN
-   ============================================================ */
-int main() {
+/* ====================== MAIN ====================== */
+
+int main(void) {
     printf("=== CLIENT ISY ===\n");
 
-    /* → AUTOMATIQUE : on découvre l’IP Windows */
-    if (decouvrir_serveur(SERVER_IP, sizeof(SERVER_IP)) != 0) {
-        printf("Impossible de trouver le serveur.\n");
-        return 1;
+    // 🔹 Tentative de découverte automatique du serveur
+    if (decouvrir_serveur(SERVER_IP, sizeof(SERVER_IP)) < 0) {
+        // Si échec, demander manuellement
+        printf("\n⚠️  Découverte automatique échouée\n");
+        printf("Entrez l'IP du serveur manuellement (Entrée = localhost) : ");
+        char buffer[TAILLE_IP];
+        if (fgets(buffer, sizeof(buffer), stdin)) {
+            nettoyer_chaine(buffer);
+            if (strlen(buffer) > 0) {
+                strncpy(SERVER_IP, buffer, TAILLE_IP - 1);
+                SERVER_IP[TAILLE_IP - 1] = '\0';
+            }
+        }
     }
+    
+    printf("📡 Connexion au serveur : %s\n\n", SERVER_IP);
 
     sockfd_client = creer_socket_udp();
+    if (sockfd_client < 0) return EXIT_FAILURE;
 
-    printf("Votre nom: ");
-    fgets(login, sizeof(login), stdin);
+    char ip_locale[TAILLE_IP];
+    get_local_ip(ip_locale, sizeof(ip_locale));
+
+#if ENABLE_IP_RECOG
+    // 🔹 Mode reconnaissance IP activé
+    FILE* f = fopen("utilisateurs_connus.txt", "r");
+    int found = 0;
+
+    if (f) {
+        char line[128], ip_stored[TAILLE_IP], nom_stored[TAILLE_LOGIN];
+        while (fgets(line, sizeof(line), f)) {
+            if (sscanf(line, "%15s -> %19s", ip_stored, nom_stored) == 2) {
+                if (strcmp(ip_stored, ip_locale) == 0) {
+                    strncpy(login, nom_stored, TAILLE_LOGIN - 1);
+                    login[TAILLE_LOGIN - 1] = '\0';
+                    found = 1;
+                    break;
+                }
+            }
+        }
+        fclose(f);
+    }
+
+    if (found) {
+        printf("Bienvenue de retour %s (IP: %s)\n", login, ip_locale);
+    } else {
+        printf("Nouvel utilisateur détecté (IP: %s)\n", ip_locale);
+        printf("Entrez votre nom: ");
+        if (fgets(login, TAILLE_LOGIN, stdin) == NULL) return EXIT_FAILURE;
+        nettoyer_chaine(login);
+
+        // 🔹 Sauvegarde dans le fichier
+        FILE* fw = fopen("utilisateurs_connus.txt", "a");
+        if (fw) {
+            fprintf(fw, "%s -> %s\n", ip_locale, login);
+            fclose(fw);
+        }
+        printf("Bienvenue %s ! Votre identité a été enregistrée.\n", login);
+    }
+#else
+    // 🔹 Mode sans reconnaissance IP
+    printf("Entrez votre nom: ");
+    if (fgets(login, TAILLE_LOGIN, stdin) == NULL) return EXIT_FAILURE;
     nettoyer_chaine(login);
+    printf("Bonjour %s ! (Reconnaissance IP désactivée)\n", login);
+#endif
 
     signal(SIGINT, gestionnaire_signal);
 
     int choix;
     while (continuer) {
         afficher_menu();
-
         if (scanf("%d", &choix) != 1) {
             while (getchar() != '\n');
+            printf("[ERREUR] Commande invalide.\n");
             continue;
         }
         while (getchar() != '\n');
@@ -323,10 +490,13 @@ int main() {
             case 1: rejoindre_groupe(); break;
             case 2: lister_groupes(); break;
             case 3: dialoguer(); break;
-            case 4: continuer = 0; break;
+            case 4: fusionner_groupes(); break;
+            case 5: continuer = 0; break;
+            default: printf("[ERREUR] Choix invalide.\n"); break;
         }
     }
 
     close(sockfd_client);
-    return 0;
+    printf("[CLIENT] Termine\n");
+    return EXIT_SUCCESS;
 }
