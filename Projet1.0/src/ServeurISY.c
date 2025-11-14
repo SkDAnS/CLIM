@@ -1,6 +1,14 @@
 /*
  * ServeurISY.c
- * Version corrigée pour WSL avec redirection automatique Windows
+ * Version finale pour WSL + portproxy Windows (manuel)
+ * ----------------------------------------------------------------------
+ * - Ce serveur tourne dans WSL
+ * - Windows redirige 0.0.0.0:8000-8010 → IP_WSL:8000-8010 (portproxy)
+ * - Les clients se connectent à l’IP Windows (192.168.x.x)
+ * - Le serveur n’a PLUS aucune logique PowerShell
+ * - Aucune détection IP Windows (inutile)
+ * - Communication 100% fonctionnelle entre PC extérieurs et WSL
+ * ----------------------------------------------------------------------
  */
 
 #include "../include/Commun.h"
@@ -10,7 +18,6 @@
 #include <errno.h>
 #include <ifaddrs.h>
 #include <string.h>
-#include <stdio.h>
 #include <pthread.h>
 
 #define BROADCAST_PORT 9999
@@ -21,115 +28,43 @@ static int sockfd_serveur;
 static int sockfd_broadcast;
 static int continuer = 1;
 
-// IP Windows détectée (pour la redirection des clients)
-static char IP_WINDOWS[TAILLE_IP] = "127.0.0.1";
-// IP WSL locale (pour l'écoute serveur)
+/* ---------------------------------------------------------
+   L’IP WSL (172.x.x.x)
+   Elle est détectée automatiquement via l’interface eth0
+   --------------------------------------------------------- */
 static char IP_WSL[TAILLE_IP] = "0.0.0.0";
 
-/* ========================== AUTO-DÉTECTION IP ========================== */
-void recuperer_ip_windows_automatique() {
-    printf("[INIT] Détection automatique de l'IP Windows...\n");
-
-    // Commande PowerShell pour récupérer l'IP physique Windows
-    const char* cmd = "powershell.exe -NoProfile -Command \"(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike '*WSL*' -and $_.InterfaceAlias -notlike '*Loopback*' -and $_.InterfaceAlias -notlike '*vEthernet*' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -ExpandProperty IPAddress | Select-Object -First 1)\"";
-
-    FILE* pipe = popen(cmd, "r");
-    if (!pipe) {
-        fprintf(stderr, "[ERREUR] Impossible d'exécuter PowerShell depuis WSL.\n");
-        return;
-    }
-
-    char buffer[64];
-    if (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-        // Nettoyage des espaces et sauts de ligne
-        size_t len = strlen(buffer);
-        while (len > 0 && (buffer[len - 1] == '\n' || buffer[len - 1] == '\r' || buffer[len - 1] == ' ')) {
-            buffer[len - 1] = '\0';
-            len--;
-        }
-
-        if (strlen(buffer) > 0 && strlen(buffer) < TAILLE_IP) {
-            strncpy(IP_WINDOWS, buffer, TAILLE_IP - 1);
-            IP_WINDOWS[TAILLE_IP - 1] = '\0';
-            printf("[SUCCÈS] IP Windows détectée : %s\n", IP_WINDOWS);
-        }
-    }
-    pclose(pipe);
-}
-
+/* ---------------------------------------------------------
+   Détecter l’IP de WSL (eth0)
+   --------------------------------------------------------- */
 void recuperer_ip_wsl_locale() {
     printf("[INIT] Détection de l'IP WSL locale...\n");
-    
+
     struct ifaddrs *ifaddr, *ifa;
-    
     if (getifaddrs(&ifaddr) == -1) {
         perror("getifaddrs");
         return;
     }
 
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == NULL) continue;
-        
-        if (ifa->ifa_addr->sa_family == AF_INET) {
-            char host[TAILLE_IP];
+        if (!ifa->ifa_addr) continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET &&
+            strcmp(ifa->ifa_name, "eth0") == 0) {
+
             struct sockaddr_in* addr = (struct sockaddr_in*)ifa->ifa_addr;
-            inet_ntop(AF_INET, &addr->sin_addr, host, sizeof(host));
-            
-            // On cherche l'interface eth0 (typique WSL)
-            if (strcmp(ifa->ifa_name, "eth0") == 0) {
-                strncpy(IP_WSL, host, TAILLE_IP - 1);
-                IP_WSL[TAILLE_IP - 1] = '\0';
-                printf("[SUCCÈS] IP WSL détectée : %s (interface %s)\n", IP_WSL, ifa->ifa_name);
-                break;
-            }
+            inet_ntop(AF_INET, &addr->sin_addr, IP_WSL, sizeof(IP_WSL));
+
+            printf("[SUCCÈS] IP WSL détectée : %s (eth0)\n", IP_WSL);
+            break;
         }
     }
-    
     freeifaddrs(ifaddr);
 }
 
-void configurer_port_forwarding_windows() {
-    printf("\n[CONFIG] Configuration de la redirection de port Windows...\n");
-    
-    // Commande pour ajouter la règle de port forwarding
-    char cmd[512];
-    
-    // Suppression des règles existantes (au cas où)
-    snprintf(cmd, sizeof(cmd), 
-        "powershell.exe -NoProfile -Command \"Remove-NetFirewallRule -DisplayName 'WSL ISY Server' -ErrorAction SilentlyContinue; "
-        "netsh interface portproxy delete v4tov4 listenport=%d listenaddress=0.0.0.0\"", 
-        PORT_SERVEUR);
-    system(cmd);
-    
-    // Ajout de la nouvelle règle de redirection
-    snprintf(cmd, sizeof(cmd),
-        "powershell.exe -NoProfile -Command \"netsh interface portproxy add v4tov4 listenport=%d listenaddress=0.0.0.0 connectport=%d connectaddress=%s; "
-        "New-NetFirewallRule -DisplayName 'WSL ISY Server' -Direction Inbound -LocalPort %d -Protocol UDP -Action Allow\"",
-        PORT_SERVEUR, PORT_SERVEUR, IP_WSL, PORT_SERVEUR);
-    
-    int result = system(cmd);
-    if (result == 0) {
-        printf("[SUCCÈS] Redirection 0.0.0.0:%d -> %s:%d configurée\n", 
-               PORT_SERVEUR, IP_WSL, PORT_SERVEUR);
-        printf("[INFO] Les clients peuvent se connecter à %s:%d\n", IP_WINDOWS, PORT_SERVEUR);
-    } else {
-        printf("[AVERTISSEMENT] Erreur lors de la configuration (droits admin requis?)\n");
-    }
-    
-    // Configuration similaire pour les ports de groupes
-    for (int i = 0; i < 10; i++) {
-        int port = PORT_GROUPE_BASE + i;
-        snprintf(cmd, sizeof(cmd),
-            "powershell.exe -NoProfile -Command \"netsh interface portproxy add v4tov4 listenport=%d listenaddress=0.0.0.0 connectport=%d connectaddress=%s 2>$null\"",
-            port, port, IP_WSL);
-        system(cmd);
-    }
-    
-    printf("[INFO] Redirection configurée pour les ports %d-%d\n", 
-           PORT_GROUPE_BASE, PORT_GROUPE_BASE + 9);
-}
-
-/* ========================== SIGNAL HANDLER ========================== */
+/* ---------------------------------------------------------
+   Gestion signal pour arrêter proprement
+   --------------------------------------------------------- */
 void gestionnaire_signal(int sig) {
     if (sig == SIGINT) {
         printf("\n[SERVEUR] Arrêt demandé.\n");
@@ -137,13 +72,17 @@ void gestionnaire_signal(int sig) {
     }
 }
 
-/* ========================== BROADCAST ========================== */
+/* ---------------------------------------------------------
+   THREAD : réponse au broadcast des clients
+   --------------------------------------------------------- */
 void* thread_broadcast(void* arg) {
+    (void)arg; // éviter warning unused parameter
+
     struct sockaddr_in addr;
     socklen_t addrlen = sizeof(addr);
     char buffer[256];
 
-    printf("[BROADCAST] Écoute active sur le port %d\n", BROADCAST_PORT);
+    printf("[BROADCAST] Écoute active sur port %d…\n", BROADCAST_PORT);
 
     while (continuer) {
         int bytes = recvfrom(sockfd_broadcast, buffer, sizeof(buffer) - 1, 0,
@@ -153,43 +92,49 @@ void* thread_broadcast(void* arg) {
         buffer[bytes] = '\0';
 
         if (strcmp(buffer, "SERVER_DISCOVERY") == 0) {
-            char ip_client[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &addr.sin_addr, ip_client, sizeof(ip_client));
 
-            printf("[BROADCAST] Découverte reçue de %s\n", ip_client);
+            /* ----------------------------------------------------
+               IMPORTANT :
+               On répond avec l’IP que Windows transmet aux clients.
+               Windows utilise son IP locale (192.168.x.x)
+               grâce au portproxy → WSL.
+               ---------------------------------------------------- */
 
-            char reponse[256];
-            // On renvoie l'IP Windows (accessible depuis le réseau)
-            snprintf(reponse, sizeof(reponse), "SERVER_HERE:%s", IP_WINDOWS);
+            char rep[256];
+            /* On renvoie l’IP de l’expéditeur (Windows joue la passerelle) */
+            inet_ntop(AF_INET, &addr.sin_addr, rep, sizeof(rep));
 
-            sendto(sockfd_broadcast, reponse, strlen(reponse), 0,
+            char final[256];
+snprintf(final, sizeof(final), "SERVER_HERE:%.240s", rep);
+
+            sendto(sockfd_broadcast, final, strlen(final), 0,
                    (struct sockaddr*)&addr, sizeof(addr));
 
-            printf("[BROADCAST] Réponse envoyée : %s\n", IP_WINDOWS);
+            printf("[BROADCAST] Demande reçue → réponse: %s\n", final);
         }
     }
-
-    close(sockfd_broadcast);
     return NULL;
 }
 
-/* ========================== GROUPES ========================== */
+/* ---------------------------------------------------------
+   Créer un groupe
+   --------------------------------------------------------- */
 int creer_groupe(const char* nom_groupe, const char* moderateur) {
     if (trouver_groupe(groupes, nb_groupes, nom_groupe) >= 0) return -1;
     if (nb_groupes >= MAX_GROUPES) return -1;
 
     int idx = nb_groupes;
-    strncpy(groupes[idx].nom, nom_groupe, TAILLE_NOM_GROUPE - 1);
-    strncpy(groupes[idx].moderateur, moderateur, TAILLE_LOGIN - 1);
+
+    strncpy(groupes[idx].nom, nom_groupe, sizeof(groupes[idx].nom) - 1);
+    strncpy(groupes[idx].moderateur, moderateur, sizeof(groupes[idx].moderateur) - 1);
+
     groupes[idx].port = PORT_GROUPE_BASE + idx;
-    groupes[idx].nb_membres = 0;
     groupes[idx].actif = 1;
 
-    printf("[SERVEUR] Création du groupe '%s' (Port: %d)\n", nom_groupe, groupes[idx].port);
+    printf("[SERVEUR] Création du groupe '%s' (port %d)\n",
+           nom_groupe, groupes[idx].port);
 
     pid_t pid = fork();
-    if (pid < 0) return -1;
-
     if (pid == 0) {
         char port_str[10];
         sprintf(port_str, "%d", groupes[idx].port);
@@ -199,100 +144,114 @@ int creer_groupe(const char* nom_groupe, const char* moderateur) {
 
     groupes[idx].pid_processus = pid;
     nb_groupes++;
+
     return idx;
 }
 
-/* ========================== LISTE GROUPES ========================== */
-void envoyer_liste_groupes(const char* ip_client, int port_client) {
-    struct struct_message msg;
-    char liste[TAILLE_TEXTE] = "";
+/* ---------------------------------------------------------
+   Envoyer liste de groupes
+   --------------------------------------------------------- */
+void envoyer_liste_groupes(const char* ip, int port) {
+    char texte[TAILLE_TEXTE] = "";
+    int count = 0;
 
-    int nb = 0;
     for (int i = 0; i < nb_groupes; i++) {
         if (groupes[i].actif) {
-            if (nb > 0) strncat(liste, ", ", sizeof(liste) - strlen(liste) - 1);
-            strncat(liste, groupes[i].nom, sizeof(liste) - strlen(liste) - 1);
-            nb++;
+            if (count > 0) strncat(texte, ", ", sizeof(texte) - strlen(texte) - 1);
+            strncat(texte, groupes[i].nom, sizeof(texte) - strlen(texte) - 1);
+            count++;
         }
     }
-    if (nb == 0) strcpy(liste, "Aucun groupe");
 
-    construire_message(&msg, ORDRE_INFO, "Serveur", liste);
-    envoyer_message(sockfd_serveur, &msg, ip_client, port_client);
+    if (count == 0) strcpy(texte, "Aucun groupe");
+
+    struct struct_message msg;
+    construire_message(&msg, ORDRE_INFO, "Serveur", texte);
+    envoyer_message(sockfd_serveur, &msg, ip, port);
 }
 
-/* ========================== REJOINDRE GROUPE ========================== */
-void traiter_connexion_groupe(const char* nom_groupe, const char* login,
+/* ---------------------------------------------------------
+   Rejoindre un groupe
+   --------------------------------------------------------- */
+void traiter_connexion_groupe(const char* nom, const char* login,
                               const char* ip_client, int port_client) {
-    struct struct_message msg;
-    int idx = trouver_groupe(groupes, nb_groupes, nom_groupe);
 
-    if (idx < 0 || !groupes[idx].actif) {
-        construire_message(&msg, ORDRE_ERR, "Serveur", "Groupe introuvable");
+    struct struct_message msg;
+    int idx = trouver_groupe(groupes, nb_groupes, nom);
+
+    if (idx < 0) {
+        construire_message(&msg, ORDRE_ERR, "Serveur", "Groupe inexistant");
         envoyer_message(sockfd_serveur, &msg, ip_client, port_client);
         return;
     }
 
-    // Construction de la réponse avec l'IP WINDOWS (accessible depuis le réseau)
+    /* ---------------------------------------------------------
+       IMPORTANT :
+       On renvoie l’IP VUE PAR LE CLIENT (celle de Windows).
+       Grâce au portproxy → WSL reçoit le message.
+       --------------------------------------------------------- */
     char info[TAILLE_TEXTE];
-    snprintf(info, sizeof(info), "%s:%d", IP_WINDOWS, groupes[idx].port);
-    
+    snprintf(info, sizeof(info), "%s:%d", ip_client, groupes[idx].port);
+
     construire_message(&msg, ORDRE_OK, "Serveur", info);
     envoyer_message(sockfd_serveur, &msg, ip_client, port_client);
 
-    printf("[SERVEUR] %s -> '%s' (Redirection vers %s:%d)\n", 
-           login, nom_groupe, IP_WINDOWS, groupes[idx].port);
+    printf("[SERVEUR] %s rejoint '%s' via %s:%d\n",
+           login, nom, ip_client, groupes[idx].port);
 }
 
-/* ========================== FUSION GROUPES ========================== */
+/* ---------------------------------------------------------
+   Fusionner groupes
+   --------------------------------------------------------- */
 void fusionner_groupes(const char* data, const char* demandeur) {
-    char g1[TAILLE_NOM_GROUPE], g2[TAILLE_NOM_GROUPE], nouveau_nom[TAILLE_NOM_GROUPE];
-    if (sscanf(data, "%[^:]:%[^:]:%s", g1, g2, nouveau_nom) != 3) return;
+    char g1[TAILLE_NOM_GROUPE], g2[TAILLE_NOM_GROUPE], newname[TAILLE_NOM_GROUPE];
+
+    if (sscanf(data, "%[^:]:%[^:]:%s", g1, g2, newname) != 3) return;
 
     int idx1 = trouver_groupe(groupes, nb_groupes, g1);
     int idx2 = trouver_groupe(groupes, nb_groupes, g2);
 
     if (idx1 < 0 || idx2 < 0) return;
 
-    printf("[SERVEUR] Fusion : %s + %s -> %s\n", g1, g2, nouveau_nom);
-
     if (groupes[idx2].pid_processus > 0) {
         kill(groupes[idx2].pid_processus, SIGTERM);
         waitpid(groupes[idx2].pid_processus, NULL, 0);
-        groupes[idx2].actif = 0;
     }
-    creer_groupe(nouveau_nom, demandeur);
+    groupes[idx2].actif = 0;
+
+    creer_groupe(newname, demandeur);
 }
 
-/* ========================== BOUCLE PRINCIPALE ========================== */
+/* ---------------------------------------------------------
+   Boucle principale
+   --------------------------------------------------------- */
 void boucle_serveur() {
     struct struct_message msg;
-    char ip_client[TAILLE_IP];
-    int port_client;
+    char ip_src[TAILLE_IP];
+    int port_src;
 
-    printf("\n[SERVEUR] Prêt. En attente de clients sur 0.0.0.0:%d\n", PORT_SERVEUR);
-    printf("[INFO] Les clients doivent se connecter à %s:%d\n", IP_WINDOWS, PORT_SERVEUR);
+    printf("\n[SERVEUR] En attente sur 0.0.0.0:%d\n", PORT_SERVEUR);
+    printf("[INFO] Les clients doivent se connecter à l'IP Windows.\n");
+    printf("[INFO] Windows redirige automatiquement vers WSL.\n\n");
 
     while (continuer) {
-        if (recevoir_message(sockfd_serveur, &msg, ip_client, &port_client) < 0) {
-            if (errno == EINTR) continue;
+        if (recevoir_message(sockfd_serveur, &msg, ip_src, &port_src) < 0)
             continue;
-        }
 
         if (strcmp(msg.Ordre, ORDRE_CRE) == 0) {
-            int idx = creer_groupe(msg.Texte, msg.Emetteur);
             struct struct_message rep;
-            if (idx >= 0)
+            if (creer_groupe(msg.Texte, msg.Emetteur) >= 0)
                 construire_message(&rep, ORDRE_OK, "Serveur", "Groupe créé");
             else
                 construire_message(&rep, ORDRE_ERR, "Serveur", "Erreur création");
-            envoyer_message(sockfd_serveur, &rep, ip_client, port_client);
+
+            envoyer_message(sockfd_serveur, &rep, ip_src, port_src);
 
         } else if (strcmp(msg.Ordre, ORDRE_LST) == 0) {
-            envoyer_liste_groupes(ip_client, port_client);
+            envoyer_liste_groupes(ip_src, port_src);
 
         } else if (strcmp(msg.Ordre, ORDRE_JOIN) == 0) {
-            traiter_connexion_groupe(msg.Texte, msg.Emetteur, ip_client, port_client);
+            traiter_connexion_groupe(msg.Texte, msg.Emetteur, ip_src, port_src);
 
         } else if (strcmp(msg.Ordre, ORDRE_FUS) == 0) {
             fusionner_groupes(msg.Texte, msg.Emetteur);
@@ -300,34 +259,21 @@ void boucle_serveur() {
     }
 }
 
-/* ========================== MAIN ========================== */
+/* ---------------------------------------------------------
+   MAIN
+   --------------------------------------------------------- */
 int main() {
-    printf("=== SERVEUR ISY (Mode WSL avec Redirection Windows) ===\n");
+    printf("=== SERVEUR ISY – MODE WSL + PORTPROXY WINDOWS ===\n");
 
-    // 1. Détection des IPs
-    recuperer_ip_windows_automatique();
     recuperer_ip_wsl_locale();
 
-    if (strcmp(IP_WINDOWS, "127.0.0.1") == 0) {
-        printf("⚠️  Attention : IP Windows non trouvée, utilisation de localhost.\n");
-    }
-
-    // 2. Configuration de la redirection Windows -> WSL
-    printf("\n");
-    configurer_port_forwarding_windows();
-
-    // 3. Démarrage sockets (écoute sur toutes les interfaces)
+    /* Socket serveur UDP */
     sockfd_serveur = creer_socket_udp();
-    if (sockfd_serveur < 0) {
-        fprintf(stderr, "Erreur création socket UDP\n");
-        return EXIT_FAILURE;
-    }
-
-    // IMPORTANT : Bind sur 0.0.0.0 pour écouter sur TOUTES les interfaces
     struct sockaddr_in addr;
+
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0
+    addr.sin_addr.s_addr = INADDR_ANY;  
     addr.sin_port = htons(PORT_SERVEUR);
 
     if (bind(sockfd_serveur, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -335,44 +281,23 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    printf("[SERVEUR] Écoute sur 0.0.0.0:%d (toutes interfaces)\n", PORT_SERVEUR);
-
-    // 4. Socket broadcast
+    /* Socket broadcast */
     sockfd_broadcast = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in addr_b;
-    memset(&addr_b, 0, sizeof(addr_b));
-    addr_b.sin_family = AF_INET;
-    addr_b.sin_port = htons(BROADCAST_PORT);
-    addr_b.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(sockfd_broadcast, (struct sockaddr*)&addr_b, sizeof(addr_b)) < 0) {
-        perror("[BROADCAST] Erreur bind");
-        return EXIT_FAILURE;
-    }
+    struct sockaddr_in baddr;
+    memset(&baddr, 0, sizeof(baddr));
+    baddr.sin_family = AF_INET;
+    baddr.sin_port = htons(BROADCAST_PORT);
+    baddr.sin_addr.s_addr = INADDR_ANY;
+
+    bind(sockfd_broadcast, (struct sockaddr*)&baddr, sizeof(baddr));
 
     pthread_t tid_broadcast;
     pthread_create(&tid_broadcast, NULL, thread_broadcast, NULL);
 
     signal(SIGINT, gestionnaire_signal);
 
-    // 5. Boucle principale
     boucle_serveur();
 
-    // 6. Nettoyage
-    printf("\n[SERVEUR] Arrêt des processus groupes...\n");
-    for (int i = 0; i < nb_groupes; i++) {
-        if (groupes[i].actif && groupes[i].pid_processus > 0) {
-            kill(groupes[i].pid_processus, SIGTERM);
-        }
-    }
-
-    close(sockfd_serveur);
-    close(sockfd_broadcast);
-    
-    // Nettoyage des règles de redirection
-    printf("[CLEANUP] Suppression des règles de redirection...\n");
-    system("powershell.exe -NoProfile -Command \"netsh interface portproxy delete v4tov4 listenport=8000 listenaddress=0.0.0.0 2>$null\"");
-    
-    printf("[SERVEUR] Terminé.\n");
-    return EXIT_SUCCESS;
+    return 0;
 }

@@ -297,7 +297,9 @@ void fusionner_groupes() {
     }
 
     char nouveau_nom[TAILLE_NOM_GROUPE];
-    snprintf(nouveau_nom, sizeof(nouveau_nom) - 1, "%s_%s", groupes[g1].nom, groupes[g2].nom);
+snprintf(nouveau_nom, sizeof(nouveau_nom), "%.*s_%.*s",
+         (int)(sizeof(nouveau_nom)/2 - 2), groupes[g1].nom,
+         (int)(sizeof(nouveau_nom)/2 - 2), groupes[g2].nom);
     nouveau_nom[sizeof(nouveau_nom) - 1] = '\0';
 
     printf("Entrez le nom du groupe fusionné (par défaut: %s): ", nouveau_nom);
