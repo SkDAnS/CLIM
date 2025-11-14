@@ -1,6 +1,6 @@
 /*
  * Utilitaires.c
- * Fonctions utilitaires communes
+ * Fonctions utilitaires communes - Version corrigée
  */
 
 #include "../include/Commun.h"
@@ -29,21 +29,30 @@ int creer_socket_udp() {
         perror("socket");
         return -1;
     }
+    
+    // Option pour réutiliser l'adresse (utile en cas de redémarrage rapide)
+    int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("setsockopt SO_REUSEADDR");
+    }
+    
     return sockfd;
 }
 
-/* Bind un socket à un port */
+/* Bind un socket à un port - MODIFIÉ pour écouter sur 0.0.0.0 */
 int bind_socket(int sockfd, int port) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0 - Écoute sur TOUTES les interfaces
     addr.sin_port = htons(port);
     
     if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         perror("bind");
         return -1;
     }
+    
+    printf("[SOCKET] Bind réussi sur 0.0.0.0:%d (toutes interfaces)\n", port);
     return 0;
 }
 

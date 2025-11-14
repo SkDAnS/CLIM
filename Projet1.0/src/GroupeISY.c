@@ -1,6 +1,6 @@
 /*
  * GroupeISY.c
- * Gestion d'un groupe de discussion
+ * Gestion d'un groupe de discussion - Version corrigée WSL
  */
 
 #include "../include/Commun.h"
@@ -38,7 +38,7 @@ int ajouter_membre(const char* login, const char* ip, int port) {
     membres[nb_membres].banni = 0;
     nb_membres++;
     
-    printf("[GROUPE %s] Nouveau membre: %s\n", nom_groupe, login);
+    printf("[GROUPE %s] Nouveau membre: %s (IP: %s)\n", nom_groupe, login, ip);
     return 1;
 }
 
@@ -50,7 +50,7 @@ void redistribuer_message(const struct struct_message* msg) {
             nb++;
         }
     }
-    printf("[GROUPE %s] %s: redistribue a %d membres\n", nom_groupe, msg->Emetteur, nb);
+    printf("[GROUPE %s] %s: redistribué à %d membres\n", nom_groupe, msg->Emetteur, nb);
 }
 
 void envoyer_liste_membres(const char* ip, int port) {
@@ -77,7 +77,7 @@ void boucle_groupe() {
     char ip_client[TAILLE_IP];
     int port_client;
     
-    printf("[GROUPE %s] En attente...\n", nom_groupe);
+    printf("[GROUPE %s] En attente de connexions sur 0.0.0.0:%d...\n", nom_groupe, port_groupe);
     
     while (continuer) {
         fd_set readfds;
@@ -110,10 +110,24 @@ int main(int argc, char* argv[]) {
     strncpy(moderateur, argv[2], TAILLE_LOGIN - 1);
     port_groupe = atoi(argv[3]);
     
-    printf("[GROUPE %s] Demarrage (Mod: %s, Port: %d)\n", nom_groupe, moderateur, port_groupe);
+    printf("[GROUPE %s] Démarrage (Mod: %s, Port: %d)\n", nom_groupe, moderateur, port_groupe);
     
     sockfd_groupe = creer_socket_udp();
-    if (sockfd_groupe < 0 || bind_socket(sockfd_groupe, port_groupe) < 0) {
+    if (sockfd_groupe < 0) {
+        fprintf(stderr, "[GROUPE %s] Erreur création socket\n", nom_groupe);
+        return EXIT_FAILURE;
+    }
+    
+    // IMPORTANT : Bind sur 0.0.0.0 pour écouter sur TOUTES les interfaces
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0
+    addr.sin_port = htons(port_groupe);
+    
+    if (bind(sockfd_groupe, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("[GROUPE] Erreur bind");
+        close(sockfd_groupe);
         return EXIT_FAILURE;
     }
     
@@ -123,7 +137,7 @@ int main(int argc, char* argv[]) {
     boucle_groupe();
     
     close(sockfd_groupe);
-    printf("[GROUPE %s] Termine\n", nom_groupe);
+    printf("[GROUPE %s] Terminé\n", nom_groupe);
     
     return EXIT_SUCCESS;
 }
