@@ -1,14 +1,10 @@
 /*
- * ServeurISY.c
- * Version finale pour WSL + portproxy Windows (manuel)
- * ----------------------------------------------------------------------
- * - Ce serveur tourne dans WSL
- * - Windows redirige 0.0.0.0:8000-8010 → IP_WSL:8000-8010 (portproxy)
- * - Les clients se connectent à l’IP Windows (192.168.x.x)
- * - Le serveur n’a PLUS aucune logique PowerShell
- * - Aucune détection IP Windows (inutile)
- * - Communication 100% fonctionnelle entre PC extérieurs et WSL
- * ----------------------------------------------------------------------
+ * ServeurISY.c — Version finale LAN / WSL auto-IP
+ * --------------------------------------------------------------
+ * - Détection automatique IP WSL (eth0)
+ * - Le serveur écoute directement sur IP WSL (ex: 172.29.x.x)
+ * - Windows redirige l’IP LAN → IP WSL via portproxy
+ * - Les clients extérieurs communiquent via IP Windows
  */
 
 #include "../include/Commun.h"
@@ -28,43 +24,12 @@ static int sockfd_serveur;
 static int sockfd_broadcast;
 static int continuer = 1;
 
-/* ---------------------------------------------------------
-   L’IP WSL (172.x.x.x)
-   Elle est détectée automatiquement via l’interface eth0
-   --------------------------------------------------------- */
 static char IP_WSL[TAILLE_IP] = "0.0.0.0";
 
-/* ---------------------------------------------------------
-   Détecter l’IP de WSL (eth0)
-   --------------------------------------------------------- */
-void recuperer_ip_wsl_locale() {
-    printf("[INIT] Détection de l'IP WSL locale...\n");
 
-    struct ifaddrs *ifaddr, *ifa;
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        return;
-    }
-
-    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_addr) continue;
-
-        if (ifa->ifa_addr->sa_family == AF_INET &&
-            strcmp(ifa->ifa_name, "eth0") == 0) {
-
-            struct sockaddr_in* addr = (struct sockaddr_in*)ifa->ifa_addr;
-            inet_ntop(AF_INET, &addr->sin_addr, IP_WSL, sizeof(IP_WSL));
-
-            printf("[SUCCÈS] IP WSL détectée : %s (eth0)\n", IP_WSL);
-            break;
-        }
-    }
-    freeifaddrs(ifaddr);
-}
-
-/* ---------------------------------------------------------
-   Gestion signal pour arrêter proprement
-   --------------------------------------------------------- */
+/* ============================================================
+   Signal handler (CTRL+C)
+   ============================================================ */
 void gestionnaire_signal(int sig) {
     if (sig == SIGINT) {
         printf("\n[SERVEUR] Arrêt demandé.\n");
@@ -72,167 +37,193 @@ void gestionnaire_signal(int sig) {
     }
 }
 
-/* ---------------------------------------------------------
-   THREAD : réponse au broadcast des clients
-   --------------------------------------------------------- */
+
+/* ============================================================
+   Détection automatique de l’IP WSL (interface eth0)
+   ============================================================ */
+void detecter_ip_wsl() {
+    struct ifaddrs *ifaddr, *ifa;
+
+    printf("[INIT] Détection IP WSL...\n");
+
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs");
+        return;
+    }
+
+    for (ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr)
+            continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET &&
+            strcmp(ifa->ifa_name, "eth0") == 0) {
+
+            struct sockaddr_in* a = (struct sockaddr_in*)ifa->ifa_addr;
+
+            inet_ntop(AF_INET, &a->sin_addr, IP_WSL, sizeof(IP_WSL));
+            printf("[SUCCÈS] IP WSL = %s\n", IP_WSL);
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+}
+
+
+/* ============================================================
+   Thread de broadcast (répond à SERVER_DISCOVERY)
+   ============================================================ */
 void* thread_broadcast(void* arg) {
-    (void)arg; // éviter warning unused parameter
+    (void)arg;
 
     struct sockaddr_in addr;
-    socklen_t addrlen = sizeof(addr);
+    socklen_t len = sizeof(addr);
     char buffer[256];
 
-    printf("[BROADCAST] Écoute active sur port %d…\n", BROADCAST_PORT);
+    printf("[BROADCAST] En écoute sur port %d…\n", BROADCAST_PORT);
 
     while (continuer) {
-        int bytes = recvfrom(sockfd_broadcast, buffer, sizeof(buffer) - 1, 0,
-                             (struct sockaddr*)&addr, &addrlen);
-        if (bytes <= 0) continue;
+        int bytes = recvfrom(sockfd_broadcast, buffer, sizeof(buffer)-1, 0,
+                             (struct sockaddr*)&addr, &len);
+        if (bytes <= 0)
+            continue;
 
         buffer[bytes] = '\0';
 
         if (strcmp(buffer, "SERVER_DISCOVERY") == 0) {
 
-            /* ----------------------------------------------------
-               IMPORTANT :
-               On répond avec l’IP que Windows transmet aux clients.
-               Windows utilise son IP locale (192.168.x.x)
-               grâce au portproxy → WSL.
-               ---------------------------------------------------- */
+            char ip_client[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &addr.sin_addr, ip_client, sizeof(ip_client));
 
             char rep[256];
-            /* On renvoie l’IP de l’expéditeur (Windows joue la passerelle) */
-            inet_ntop(AF_INET, &addr.sin_addr, rep, sizeof(rep));
+            snprintf(rep, sizeof(rep), "SERVER_HERE:%s", ip_client);
 
-            char final[256];
-snprintf(final, sizeof(final), "SERVER_HERE:%.240s", rep);
-
-            sendto(sockfd_broadcast, final, strlen(final), 0,
+            sendto(sockfd_broadcast, rep, strlen(rep), 0,
                    (struct sockaddr*)&addr, sizeof(addr));
 
-            printf("[BROADCAST] Demande reçue → réponse: %s\n", final);
+            printf("[BROADCAST] Réponse envoyée : %s\n", rep);
         }
     }
+
     return NULL;
 }
 
-/* ---------------------------------------------------------
-   Créer un groupe
-   --------------------------------------------------------- */
-int creer_groupe(const char* nom_groupe, const char* moderateur) {
-    if (trouver_groupe(groupes, nb_groupes, nom_groupe) >= 0) return -1;
+
+/* ============================================================
+   Création d’un groupe
+   ============================================================ */
+int creer_groupe(const char* nom, const char* moderateur) {
+    if (trouver_groupe(groupes, nb_groupes, nom) >= 0) return -1;
     if (nb_groupes >= MAX_GROUPES) return -1;
 
     int idx = nb_groupes;
 
-    strncpy(groupes[idx].nom, nom_groupe, sizeof(groupes[idx].nom) - 1);
-    strncpy(groupes[idx].moderateur, moderateur, sizeof(groupes[idx].moderateur) - 1);
+    strncpy(groupes[idx].nom, nom, TAILLE_NOM_GROUPE - 1);
+    strncpy(groupes[idx].moderateur, moderateur, TAILLE_LOGIN - 1);
 
     groupes[idx].port = PORT_GROUPE_BASE + idx;
     groupes[idx].actif = 1;
 
     printf("[SERVEUR] Création du groupe '%s' (port %d)\n",
-           nom_groupe, groupes[idx].port);
+           groupes[idx].nom, groupes[idx].port);
 
     pid_t pid = fork();
     if (pid == 0) {
         char port_str[10];
         sprintf(port_str, "%d", groupes[idx].port);
-        execl("./bin/GroupeISY", "GroupeISY", nom_groupe, moderateur, port_str, NULL);
+        execl("./bin/GroupeISY", "GroupeISY", nom, moderateur, port_str, NULL);
         exit(EXIT_FAILURE);
     }
 
     groupes[idx].pid_processus = pid;
     nb_groupes++;
-
     return idx;
 }
 
-/* ---------------------------------------------------------
-   Envoyer liste de groupes
-   --------------------------------------------------------- */
+
+/* ============================================================
+   Envoi liste groupes
+   ============================================================ */
 void envoyer_liste_groupes(const char* ip, int port) {
-    char texte[TAILLE_TEXTE] = "";
+    struct struct_message msg;
+    char liste[TAILLE_TEXTE] = "";
     int count = 0;
 
     for (int i = 0; i < nb_groupes; i++) {
         if (groupes[i].actif) {
-            if (count > 0) strncat(texte, ", ", sizeof(texte) - strlen(texte) - 1);
-            strncat(texte, groupes[i].nom, sizeof(texte) - strlen(texte) - 1);
+            if (count > 0)
+                strncat(liste, ", ", sizeof(liste) - strlen(liste) - 1);
+            strncat(liste, groupes[i].nom, sizeof(liste) - strlen(liste) - 1);
             count++;
         }
     }
 
-    if (count == 0) strcpy(texte, "Aucun groupe");
+    if (count == 0)
+        strcpy(liste, "Aucun groupe");
 
-    struct struct_message msg;
-    construire_message(&msg, ORDRE_INFO, "Serveur", texte);
+    construire_message(&msg, ORDRE_INFO, "Serveur", liste);
     envoyer_message(sockfd_serveur, &msg, ip, port);
 }
 
-/* ---------------------------------------------------------
+
+/* ============================================================
    Rejoindre un groupe
-   --------------------------------------------------------- */
+   ============================================================ */
 void traiter_connexion_groupe(const char* nom, const char* login,
                               const char* ip_client, int port_client) {
 
-    struct struct_message msg;
     int idx = trouver_groupe(groupes, nb_groupes, nom);
+    struct struct_message msg;
 
     if (idx < 0) {
-        construire_message(&msg, ORDRE_ERR, "Serveur", "Groupe inexistant");
+        construire_message(&msg, ORDRE_ERR, "Serveur", "Groupe introuvable");
         envoyer_message(sockfd_serveur, &msg, ip_client, port_client);
         return;
     }
 
-    /* ---------------------------------------------------------
-       IMPORTANT :
-       On renvoie l’IP VUE PAR LE CLIENT (celle de Windows).
-       Grâce au portproxy → WSL reçoit le message.
-       --------------------------------------------------------- */
-    char info[TAILLE_TEXTE];
-    snprintf(info, sizeof(info), "%s:%d", ip_client, groupes[idx].port);
+    char rep[TAILLE_TEXTE];
+    snprintf(rep, sizeof(rep), "%s:%d", ip_client, groupes[idx].port);
 
-    construire_message(&msg, ORDRE_OK, "Serveur", info);
+    construire_message(&msg, ORDRE_OK, "Serveur", rep);
     envoyer_message(sockfd_serveur, &msg, ip_client, port_client);
 
-    printf("[SERVEUR] %s rejoint '%s' via %s:%d\n",
-           login, nom, ip_client, groupes[idx].port);
+    printf("[SERVEUR] %s rejoint '%s' via %s\n", login, nom, ip_client);
 }
 
-/* ---------------------------------------------------------
-   Fusionner groupes
-   --------------------------------------------------------- */
+
+/* ============================================================
+   Fusion de groupes
+   ============================================================ */
 void fusionner_groupes(const char* data, const char* demandeur) {
-    char g1[TAILLE_NOM_GROUPE], g2[TAILLE_NOM_GROUPE], newname[TAILLE_NOM_GROUPE];
+    char a[30], b[30], newname[30];
+    if (sscanf(data, "%[^:]:%[^:]:%s", a, b, newname) != 3)
+        return;
 
-    if (sscanf(data, "%[^:]:%[^:]:%s", g1, g2, newname) != 3) return;
+    int g1 = trouver_groupe(groupes, nb_groupes, a);
+    int g2 = trouver_groupe(groupes, nb_groupes, b);
 
-    int idx1 = trouver_groupe(groupes, nb_groupes, g1);
-    int idx2 = trouver_groupe(groupes, nb_groupes, g2);
+    if (g1 < 0 || g2 < 0)
+        return;
 
-    if (idx1 < 0 || idx2 < 0) return;
-
-    if (groupes[idx2].pid_processus > 0) {
-        kill(groupes[idx2].pid_processus, SIGTERM);
-        waitpid(groupes[idx2].pid_processus, NULL, 0);
-    }
-    groupes[idx2].actif = 0;
+    kill(groupes[g2].pid_processus, SIGTERM);
+    waitpid(groupes[g2].pid_processus, NULL, 0);
+    groupes[g2].actif = 0;
 
     creer_groupe(newname, demandeur);
 }
 
-/* ---------------------------------------------------------
+
+/* ============================================================
    Boucle principale
-   --------------------------------------------------------- */
+   ============================================================ */
 void boucle_serveur() {
     struct struct_message msg;
     char ip_src[TAILLE_IP];
     int port_src;
 
-    printf("\n[SERVEUR] En attente sur 0.0.0.0:%d\n", PORT_SERVEUR);
-    printf("[INFO] Les clients doivent se connecter à l'IP Windows.\n");
-    printf("[INFO] Windows redirige automatiquement vers WSL.\n\n");
+    printf("\n[SERVEUR] Écoute sur %s:%d\n", IP_WSL, PORT_SERVEUR);
+    printf("[INFO] Les clients doivent se connecter à l’IP Windows.\n");
+    printf("[INFO] Windows redirige automatiquement vers %s\n\n", IP_WSL);
 
     while (continuer) {
         if (recevoir_message(sockfd_serveur, &msg, ip_src, &port_src) < 0)
@@ -243,37 +234,41 @@ void boucle_serveur() {
             if (creer_groupe(msg.Texte, msg.Emetteur) >= 0)
                 construire_message(&rep, ORDRE_OK, "Serveur", "Groupe créé");
             else
-                construire_message(&rep, ORDRE_ERR, "Serveur", "Erreur création");
+                construire_message(&rep, ORDRE_ERR, "Serveur", "Création impossible");
 
             envoyer_message(sockfd_serveur, &rep, ip_src, port_src);
+        }
 
-        } else if (strcmp(msg.Ordre, ORDRE_LST) == 0) {
+        else if (strcmp(msg.Ordre, ORDRE_LST) == 0) {
             envoyer_liste_groupes(ip_src, port_src);
+        }
 
-        } else if (strcmp(msg.Ordre, ORDRE_JOIN) == 0) {
+        else if (strcmp(msg.Ordre, ORDRE_JOIN) == 0) {
             traiter_connexion_groupe(msg.Texte, msg.Emetteur, ip_src, port_src);
+        }
 
-        } else if (strcmp(msg.Ordre, ORDRE_FUS) == 0) {
+        else if (strcmp(msg.Ordre, ORDRE_FUS) == 0) {
             fusionner_groupes(msg.Texte, msg.Emetteur);
         }
     }
 }
 
-/* ---------------------------------------------------------
+
+/* ============================================================
    MAIN
-   --------------------------------------------------------- */
+   ============================================================ */
 int main() {
-    printf("=== SERVEUR ISY – MODE WSL + PORTPROXY WINDOWS ===\n");
+    printf("=== SERVEUR ISY – WSL AUTO-IP ===\n");
 
-    recuperer_ip_wsl_locale();
+    detecter_ip_wsl();
 
-    /* Socket serveur UDP */
+    /* Création socket UDP serveur */
     sockfd_serveur = creer_socket_udp();
-    struct sockaddr_in addr;
 
+    struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;  
+    inet_pton(AF_INET, IP_WSL, &addr.sin_addr);
     addr.sin_port = htons(PORT_SERVEUR);
 
     if (bind(sockfd_serveur, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -281,7 +276,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    /* Socket broadcast */
+    /* Broadcast */
     sockfd_broadcast = socket(AF_INET, SOCK_DGRAM, 0);
 
     struct sockaddr_in baddr;
@@ -292,8 +287,8 @@ int main() {
 
     bind(sockfd_broadcast, (struct sockaddr*)&baddr, sizeof(baddr));
 
-    pthread_t tid_broadcast;
-    pthread_create(&tid_broadcast, NULL, thread_broadcast, NULL);
+    pthread_t tid;
+    pthread_create(&tid, NULL, thread_broadcast, NULL);
 
     signal(SIGINT, gestionnaire_signal);
 
