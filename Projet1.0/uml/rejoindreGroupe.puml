@@ -1,0 +1,17 @@
+@startuml
+left to right direction
+
+actor Utilisateur
+
+usecase "Lister groupes" as UC_List
+usecase "Rejoindre groupe" as UC_Join
+usecase "Quitter groupe" as UC_Leave
+usecase "Lister membres du groupe" as UC_Members
+
+Utilisateur --> UC_List
+Utilisateur --> UC_Join
+Utilisateur --> UC_Leave
+
+UC_Join --> UC_Members : <<extend>>
+
+@enduml

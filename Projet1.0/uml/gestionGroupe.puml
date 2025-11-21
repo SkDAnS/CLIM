@@ -1,0 +1,18 @@
+@startuml
+left to right direction
+
+actor Gestionnaire
+
+usecase "Gérer groupe" as UC_Manage
+
+usecase "Supprimer groupe" as UC_Delete
+usecase "Fusionner groupes" as UC_Merge
+usecase "Modérer un membre" as UC_Moderate
+
+Gestionnaire --> UC_Manage
+
+UC_Manage --> UC_Delete : <<extend>>
+UC_Manage --> UC_Merge : <<extend>>
+UC_Manage --> UC_Moderate : <<extend>>
+
+@enduml

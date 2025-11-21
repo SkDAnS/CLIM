@@ -1,0 +1,19 @@
+@startuml
+left to right direction
+
+actor Utilisateur
+
+usecase "Créer groupe" as UC_Create
+usecase "Se loguer" as UC_Login
+usecase "Renseigner Groupe" as UC_Info
+usecase "Vérifier Groupe" as UC_Check
+usecase "Initialiser Groupe" as UC_Init
+
+Utilisateur --> UC_Create
+
+UC_Create --> UC_Login : <<include>>
+UC_Create --> UC_Info : <<include>>
+UC_Create --> UC_Check : <<include>>
+UC_Create --> UC_Init : <<include>>
+
+@enduml
