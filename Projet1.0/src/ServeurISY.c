@@ -57,33 +57,22 @@ void gestionnaire_signal(int sig) {
 /* ============================================================
    Détection automatique de l’IP WSL (interface eth0)
    ============================================================ */
-void detecter_ip_wsl() {
-    struct ifaddrs *ifaddr, *ifa;
+char* detecter_ip_vm() {
+    static char ip[INET_ADDRSTRLEN] = "0.0.0.0";
+    FILE *f = popen("ip route get 1.1.1.1 | awk '/src/ {print $7}'", "r");
+    if (!f) return ip;
 
-    printf("[INIT] Détection IP WSL...\n");
-
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        return;
+    char buffer[64] = {0};
+    if (fgets(buffer, sizeof(buffer), f) != NULL) {
+        buffer[strcspn(buffer, "\n")] = 0;
+        if(strlen(buffer) > 0)
+            strncpy(ip, buffer, sizeof(ip));
     }
 
-    for (ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_addr)
-            continue;
-
-        if (ifa->ifa_addr->sa_family == AF_INET &&
-            strcmp(ifa->ifa_name, "eth0") == 0) {
-
-            struct sockaddr_in* a = (struct sockaddr_in*)ifa->ifa_addr;
-
-            inet_ntop(AF_INET, &a->sin_addr, IP_WSL, sizeof(IP_WSL));
-            printf("[SUCCÈS] IP WSL = %s\n", IP_WSL);
-            break;
-        }
-    }
-
-    freeifaddrs(ifaddr);
+    pclose(f);
+    return ip;
 }
+
 
 
 /* ============================================================
@@ -279,7 +268,7 @@ void boucle_serveur() {
 int main() {
     printf("=== SERVEUR ISY – WSL AUTO-IP ===\n");
 
-    detecter_ip_wsl();
+    detecter_ip_vm();
 
     sockfd_serveur = creer_socket_udp();
 

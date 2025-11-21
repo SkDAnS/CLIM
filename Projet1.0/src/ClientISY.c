@@ -22,7 +22,7 @@
 #define BROADCAST_PORT 8005  // Port pour la découverte serveur
 
 // 🔹 Configuration du serveur
-static char SERVER_IP[TAILLE_IP] = "172.29.168.27"; // Par défaut localhost
+static char SERVER_IP[TAILLE_IP] = "10.23.197.107"; // Par défaut localhost
 
 static char login[TAILLE_LOGIN];
 static int sockfd_client;
@@ -198,6 +198,7 @@ void creer_groupe() {
 
     struct struct_message msg, rep;
     construire_message(&msg, ORDRE_CRE, login, nom);
+    printf("VOICI L'IP DU SERVER %s\n", SERVER_IP);
     envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
     char ip[TAILLE_IP];
@@ -405,11 +406,11 @@ int main(void) {
 
     char ip_detectee[TAILLE_IP];
 
-if (decouvrir_serveur(ip_detectee, sizeof(ip_detectee)) == 0) {
+/*if (decouvrir_serveur(ip_detectee, sizeof(ip_detectee)) == 0) {
     // 🔥 Correction : mettre à jour SERVER_IP global
     strncpy(SERVER_IP, ip_detectee, TAILLE_IP);
     SERVER_IP[TAILLE_IP - 1] = '\0';
-}
+}*/
 
 printf("📡 Connexion au serveur : %s\n", SERVER_IP);
 
