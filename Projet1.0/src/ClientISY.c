@@ -22,7 +22,7 @@
 #define BROADCAST_PORT 8005  // Port pour la découverte serveur
 
 // 🔹 Configuration du serveur
-static char SERVER_IP[TAILLE_IP] = "127.0.0.1"; // Par défaut localhost
+static char SERVER_IP[TAILLE_IP] = "172.29.168.27"; // Par défaut localhost
 
 static char login[TAILLE_LOGIN];
 static int sockfd_client;
@@ -42,28 +42,24 @@ static int nb_groupes_rejoints = 0;
 /* ====================== UTILITAIRES ====================== */
 
 void get_local_ip(char* buffer, size_t size) {
-#if ENABLE_IP_RECOG
-    FILE* f = fopen("/etc/resolv.conf", "r");
-    if (f) {
-        char line[256];
-        while (fgets(line, sizeof(line), f)) {
-            if (strncmp(line, "nameserver", 10) == 0) {
-                char ip[64];
-                if (sscanf(line, "nameserver %63s", ip) == 1) {
-                    strncpy(buffer, ip, size - 1);
-                    buffer[size - 1] = '\0';
-                    fclose(f);
-                    return;
-                }
-            }
-        }
-        fclose(f);
+    FILE* f = popen("ip route get 1.1.1.1 | awk '/src/ {print $7}'", "r");
+    if (!f) {
+        strncpy(buffer, "127.0.0.1", size - 1);
+        buffer[size - 1] = '\0';
+        return;
     }
-#endif
-    // fallback
-    strncpy(buffer, "127.0.0.1", size - 1);
-    buffer[size - 1] = '\0';
+
+    if (fgets(buffer, size, f) == NULL) {
+        strncpy(buffer, "127.0.0.1", size - 1);
+        buffer[size - 1] = '\0';
+        pclose(f);
+        return;
+    }
+
+    buffer[strcspn(buffer, "\n")] = '\0'; // remove newline
+    pclose(f);
 }
+
 
 
 /* 🔹 NOUVELLE FONCTION : Découverte automatique du serveur */
@@ -174,6 +170,7 @@ void gestionnaire_signal(int sig) {
     if (sig == SIGINT) {
         printf("\n[CLIENT] CTRL-C...\n");
         continuer = 0;
+        exit(0);
     }
 }
 
@@ -406,28 +403,24 @@ void dialoguer() {
 int main(void) {
     printf("=== CLIENT ISY ===\n");
 
-    // 🔹 Tentative de découverte automatique du serveur
-    if (decouvrir_serveur(SERVER_IP, sizeof(SERVER_IP)) < 0) {
-        // Si échec, demander manuellement
-        printf("\n⚠️  Découverte automatique échouée\n");
-        printf("Entrez l'IP du serveur manuellement (Entrée = localhost) : ");
-        char buffer[TAILLE_IP];
-        if (fgets(buffer, sizeof(buffer), stdin)) {
-            nettoyer_chaine(buffer);
-            if (strlen(buffer) > 0) {
-                strncpy(SERVER_IP, buffer, TAILLE_IP - 1);
-                SERVER_IP[TAILLE_IP - 1] = '\0';
-            }
-        }
-    }
-    
-    printf("📡 Connexion au serveur : %s\n\n", SERVER_IP);
+    char ip_detectee[TAILLE_IP];
+
+if (decouvrir_serveur(ip_detectee, sizeof(ip_detectee)) == 0) {
+    // 🔥 Correction : mettre à jour SERVER_IP global
+    strncpy(SERVER_IP, ip_detectee, TAILLE_IP);
+    SERVER_IP[TAILLE_IP - 1] = '\0';
+}
+
+printf("📡 Connexion au serveur : %s\n", SERVER_IP);
+
 
     sockfd_client = creer_socket_udp();
     if (sockfd_client < 0) return EXIT_FAILURE;
 
     char ip_locale[TAILLE_IP];
     get_local_ip(ip_locale, sizeof(ip_locale));
+    printf("[DEBUG CLIENT] IP locale détectée = %s\n", ip_locale);
+
 
 #if ENABLE_IP_RECOG
     // 🔹 Mode reconnaissance IP activé
@@ -491,7 +484,7 @@ int main(void) {
             case 2: lister_groupes(); break;
             case 3: dialoguer(); break;
             case 4: fusionner_groupes(); break;
-            case 5: continuer = 0; break;
+            case 5: continuer = 0; exit(0); break;
             default: printf("[ERREUR] Choix invalide.\n"); break;
         }
     }

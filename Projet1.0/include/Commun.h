@@ -23,7 +23,7 @@
 #include <time.h>
 
 /* CONSTANTES */
-#define PORT_SERVEUR 8000
+#define PORT_SERVEUR 5353
 #define PORT_GROUPE_BASE 8001
 #define MAX_GROUPES 50
 #define MAX_MEMBRES_PAR_GROUPE 20

@@ -99,7 +99,7 @@ void* thread_broadcast(void* arg) {
     printf("[BROADCAST] En écoute sur port %d…\n", BROADCAST_PORT);
 
     while (continuer) {
-        int bytes = recvfrom(sockfd_broadcast, buffer, sizeof(buffer)-1, 0,
+        int bytes = recvfrom(sockfd_broadcast, buffer, sizeof(buffer) - 1, 0,
                              (struct sockaddr*)&addr, &len);
 
         if (bytes <= 0)
@@ -108,21 +108,20 @@ void* thread_broadcast(void* arg) {
         buffer[bytes] = '\0';
 
         if (strcmp(buffer, "SERVER_DISCOVERY") == 0) {
-
-            /* IMPORTANT :
-               On renvoie l’IP Windows vue par le client,
-               récupérée par portproxy (addr.sin_addr).
-            */
-            char ip_client[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &addr.sin_addr, ip_client, sizeof(ip_client));
-
             char rep[256];
-            snprintf(rep, sizeof(rep), "SERVER_HERE:%s", ip_client);
 
-            sendto(sockfd_broadcast, rep, strlen(rep), 0,
-                   (struct sockaddr*)&addr, sizeof(addr));
+            // 🔴 AVANT : tu renvoyais l'IP du client (addr.sin_addr)
+            // ✅ MAINTENANT : on renvoie l'IP du SERVEUR (IP_WSL)
+            snprintf(rep, sizeof(rep), "SERVER_HERE:%s", IP_WSL);
 
-            printf("[BROADCAST] Réponse envoyée : %s\n", rep);
+            if (sendto(sockfd_broadcast, rep, strlen(rep), 0,(struct sockaddr*)&addr, sizeof(addr)) < 0) {
+                perror("[BROADCAST] sendto");
+            } else {
+                printf("[BROADCAST] Requête de %s:%d → réponse \"%s\"\n",
+                       inet_ntoa(addr.sin_addr),
+                       ntohs(addr.sin_port),
+                       rep);
+            }
         }
     }
 
