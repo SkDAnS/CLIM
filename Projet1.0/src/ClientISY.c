@@ -406,11 +406,11 @@ int main(void) {
 
     char ip_detectee[TAILLE_IP];
 
-/*if (decouvrir_serveur(ip_detectee, sizeof(ip_detectee)) == 0) {
+if (decouvrir_serveur(ip_detectee, sizeof(ip_detectee)) == 0) {
     // 🔥 Correction : mettre à jour SERVER_IP global
     strncpy(SERVER_IP, ip_detectee, TAILLE_IP);
     SERVER_IP[TAILLE_IP - 1] = '\0';
-}*/
+}
 
 printf("📡 Connexion au serveur : %s\n", SERVER_IP);
 
