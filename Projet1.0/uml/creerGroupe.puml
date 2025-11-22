@@ -1,19 +1,18 @@
 @startuml
-left to right direction
-
 actor Utilisateur
 
-usecase "Créer groupe" as UC_Create
-usecase "Se loguer" as UC_Login
-usecase "Renseigner Groupe" as UC_Info
-usecase "Vérifier Groupe" as UC_Check
+usecase "Créer groupe" as UC_Creer
+usecase "Se loguer" as UC_Log
+usecase "Renseigner Groupe" as UC_Rens
+usecase "Vérifier Groupe" as UC_Verif
 usecase "Initialiser Groupe" as UC_Init
 
-Utilisateur --> UC_Create
+Utilisateur --> UC_Creer
 
-UC_Create --> UC_Login : <<include>>
-UC_Create --> UC_Info : <<include>>
-UC_Create --> UC_Check : <<include>>
-UC_Create --> UC_Init : <<include>>
+UC_Creer ..> UC_Rens : <<include>>
+UC_Creer ..> UC_Verif : <<include>>
+
+UC_Creer ..> UC_Log : <<extend>>\n"si pas encore logué"
+UC_Creer ..> UC_Init : <<extend>>\n"si vérification OK"
 
 @enduml

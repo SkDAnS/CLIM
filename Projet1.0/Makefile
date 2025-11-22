@@ -1,36 +1,41 @@
-# Makefile ISY Messagerie
+CC      = gcc
+CFLAGS  = -Wall -Wextra -std=c11 -O2
+LDFLAGS = 
 
-CC = gcc
-CFLAGS = -Wall -Wextra -g -I./include
-SRC = src
-OBJ = obj
-BIN = bin
+SRCDIR  = src
+BINDIR  = .
+OBJDIR  = obj
 
-all: directories $(BIN)/ServeurISY $(BIN)/GroupeISY $(BIN)/ClientISY $(BIN)/AffichageISY
-	@echo "=== Compilation terminee ==="
+SOURCES = $(SRCDIR)/ServeurISY.c $(SRCDIR)/GroupeISY.c \
+          $(SRCDIR)/ClientISY.c $(SRCDIR)/AffichageISY.c
+OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-directories:
-	@mkdir -p $(OBJ) $(BIN)
+TARGETS = ServeurISY GroupeISY ClientISY AffichageISY
 
-$(BIN)/ServeurISY: $(OBJ)/ServeurISY.o $(OBJ)/Utilitaires.o
-	$(CC) $(CFLAGS) -o $@ $^
+all: $(TARGETS)
 
-$(BIN)/GroupeISY: $(OBJ)/GroupeISY.o $(OBJ)/Utilitaires.o
-	$(CC) $(CFLAGS) -o $@ $^
-
-$(BIN)/ClientISY: $(OBJ)/ClientISY.o $(OBJ)/Utilitaires.o
-	$(CC) $(CFLAGS) -o $@ $^
-
-$(BIN)/AffichageISY: $(OBJ)/AffichageISY.o $(OBJ)/Utilitaires.o
-	$(CC) $(CFLAGS) -o $@ $^
-
-$(OBJ)/%.o: $(SRC)/%.c include/Commun.h
+$(OBJDIR)/%.o: $(SRCDIR)/%.c $(SRCDIR)/Commun.h
+	@mkdir -p $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+ServeurISY: $(OBJDIR)/ServeurISY.o $(OBJDIR)/Commun.o
+	$(CC) $^ -o $@ $(LDFLAGS)
+
+GroupeISY: $(OBJDIR)/GroupeISY.o $(OBJDIR)/Commun.o
+	$(CC) $^ -o $@ $(LDFLAGS)
+
+ClientISY: $(OBJDIR)/ClientISY.o $(OBJDIR)/Commun.o
+	$(CC) $^ -o $@ $(LDFLAGS)
+
+AffichageISY: $(OBJDIR)/AffichageISY.o $(OBJDIR)/Commun.o
+	$(CC) $^ -o $@ $(LDFLAGS)
+
+# Petit "truc" : compiler Commun.h comme s’il y avait Commun.c
+$(OBJDIR)/Commun.o: $(SRCDIR)/Commun.h
+	@mkdir -p $(OBJDIR)
+	$(CC) $(CFLAGS) -c -x c $(SRCDIR)/Commun.h -o $@
+
 clean:
-	rm -rf $(OBJ)/*.o
+	rm -rf $(OBJDIR) $(TARGETS)
 
-mrproper: clean
-	rm -rf $(BIN)/*
-
-.PHONY: all clean mrproper directories
+.PHONY: all clean

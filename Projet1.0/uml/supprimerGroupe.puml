@@ -1,0 +1,19 @@
+@startuml
+actor Gestionnaire
+
+usecase "Supprimer un groupe" as UC_Suppr
+usecase "Se loguer" as UC_Log
+usecase "Sélectionner groupe" as UC_Sel
+usecase "Vérifier droits" as UC_VerifDroit
+usecase "Confirmer suppression" as UC_Conf
+usecase "Clôturer les sessions" as UC_Close
+
+Gestionnaire --> UC_Suppr
+
+UC_Suppr ..> UC_Log : <<extend>>\n"si pas logué"
+UC_Suppr ..> UC_Sel : <<include>>
+UC_Suppr ..> UC_VerifDroit : <<include>>
+UC_Suppr ..> UC_Conf : <<include>>
+UC_Suppr ..> UC_Close : <<extend>>\n"si suppression validée"
+
+@enduml

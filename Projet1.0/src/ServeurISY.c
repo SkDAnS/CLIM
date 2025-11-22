@@ -1,305 +1,190 @@
-/*
- * ServeurISY.c — Version finale LAN / WSL auto-IP
- * --------------------------------------------------------------
- * - Détection automatique IP WSL (eth0)
- * - Le serveur écoute directement sur IP WSL (ex: 172.29.x.x)
- * - Windows redirige l’IP LAN → IP WSL via portproxy
- * - Les clients extérieurs communiquent via IP Windows
- * - CTRL+C tue tous les groupes + ferme les sockets
- */
+#include "Commun.h"
 
-#include "../include/Commun.h"
-#include <signal.h>
-#include <sys/wait.h>
-#include <arpa/inet.h>
-#include <errno.h>
-#include <ifaddrs.h>
-#include <string.h>
-#include <pthread.h>
+static int sock_srv;
+static GroupeInfo groupes[MAX_GROUPS];
+static int running = 1;
 
-#define BROADCAST_PORT 8005
-
-static Groupe groupes[MAX_GROUPES];
-static int nb_groupes = 0;
-static int sockfd_serveur;
-static int sockfd_broadcast;
-static int continuer = 1;
-
-static char IP_WSL[TAILLE_IP] = "0.0.0.0";
-
-
-/* ============================================================
-   Signal handler : tuer tout proprement
-   ============================================================ */
-void gestionnaire_signal(int sig) {
-    if (sig == SIGINT) {
-        printf("\n[SERVEUR] Arrêt demandé (CTRL+C).\n");
-
-        /* 🔥 kill tous les groupes */
-        for (int i = 0; i < nb_groupes; i++) {
-            if (groupes[i].actif && groupes[i].pid_processus > 0) {
-                printf("[SERVEUR] Kill groupe: %s (PID %d)\n",
-                       groupes[i].nom, groupes[i].pid_processus);
-                kill(groupes[i].pid_processus, SIGTERM);
-                waitpid(groupes[i].pid_processus, NULL, 0);
-            }
-        }
-
-        close(sockfd_serveur);
-        close(sockfd_broadcast);
-
-        printf("[SERVEUR] Fermeture propre.\n");
-        exit(0);
-    }
+/* Nettoyage sur CTRL-C */
+void handle_sigint(int sig)
+{
+    (void)sig;
+    running = 0;
 }
 
-
-/* ============================================================
-   Détection automatique de l’IP WSL (interface eth0)
-   ============================================================ */
-char* detecter_ip_vm() {
-    static char ip[INET_ADDRSTRLEN] = "0.0.0.0";
-    FILE *f = popen("ip route get 1.1.1.1 | awk '/src/ {print $7}'", "r");
-    if (!f) return ip;
-
-    char buffer[64] = {0};
-    if (fgets(buffer, sizeof(buffer), f) != NULL) {
-        buffer[strcspn(buffer, "\n")] = 0;
-        if(strlen(buffer) > 0)
-            strncpy(ip, buffer, sizeof(ip));
+/* Cherche un groupe par nom, renvoie son index ou -1 */
+static int find_group(const char *name)
+{
+    for (int i = 0; i < MAX_GROUPS; ++i) {
+        if (groupes[i].actif && strcmp(groupes[i].nom, name) == 0)
+            return i;
     }
-
-    pclose(f);
-    return ip;
+    return -1;
 }
 
-
-
-/* ============================================================
-   Thread de broadcast (répond à SERVER_DISCOVERY)
-   ============================================================ */
-void* thread_broadcast(void* arg) {
-    (void)arg;
-
-    struct sockaddr_in addr;
-    socklen_t len = sizeof(addr);
-    char buffer[256];
-
-    printf("[BROADCAST] En écoute sur port %d…\n", BROADCAST_PORT);
-
-    while (continuer) {
-        int bytes = recvfrom(sockfd_broadcast, buffer, sizeof(buffer) - 1, 0,
-                             (struct sockaddr*)&addr, &len);
-
-        if (bytes <= 0)
-            continue;
-
-        buffer[bytes] = '\0';
-
-        if (strcmp(buffer, "SERVER_DISCOVERY") == 0) {
-            char rep[256];
-
-            // 🔴 AVANT : tu renvoyais l'IP du client (addr.sin_addr)
-            // ✅ MAINTENANT : on renvoie l'IP du SERVEUR (IP_WSL)
-            snprintf(rep, sizeof(rep), "SERVER_HERE:%s", IP_WSL);
-
-            if (sendto(sockfd_broadcast, rep, strlen(rep), 0,(struct sockaddr*)&addr, sizeof(addr)) < 0) {
-                perror("[BROADCAST] sendto");
-            } else {
-                printf("[BROADCAST] Requête de %s:%d → réponse \"%s\"\n",
-                       inet_ntoa(addr.sin_addr),
-                       ntohs(addr.sin_port),
-                       rep);
-            }
-        }
-    }
-
-    return NULL;
-}
-
-
-/* ============================================================
-   Création d’un groupe
-   ============================================================ */
-int creer_groupe(const char* nom, const char* moderateur) {
-    if (trouver_groupe(groupes, nb_groupes, nom) >= 0) return -1;
-    if (nb_groupes >= MAX_GROUPES) return -1;
-
-    int idx = nb_groupes;
-
-    strncpy(groupes[idx].nom, nom, TAILLE_NOM_GROUPE - 1);
-    strncpy(groupes[idx].moderateur, moderateur, TAILLE_LOGIN - 1);
-
-    groupes[idx].port = PORT_GROUPE_BASE + idx;
-    groupes[idx].actif = 1;
-
-    printf("[SERVEUR] Création du groupe '%s' (port %d)\n",
-           groupes[idx].nom, groupes[idx].port);
-
+/* Crée un GroupeISY (processus) */
+static int create_group_process(int index)
+{
     pid_t pid = fork();
+    check_fatal(pid < 0, "fork GroupeISY");
+
     if (pid == 0) {
-        char port_str[10];
-        sprintf(port_str, "%d", groupes[idx].port);
-        execl("./bin/GroupeISY", "GroupeISY", nom, moderateur, port_str, NULL);
-        exit(EXIT_FAILURE);
+        /* Processus fils : exécuter GroupeISY */
+        char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", groupes[index].port_groupe);
+
+        execl("./GroupeISY", "./GroupeISY",
+              groupes[index].nom,
+              groupes[index].moderateur,
+              port_str,
+              (char *)NULL);
+
+        perror("execl GroupeISY");
+        _exit(EXIT_FAILURE);
     }
 
-    groupes[idx].pid_processus = pid;
-    nb_groupes++;
-    return idx;
+    /* Père : continue */
+    return 0;
 }
 
+/* Traite une commande CMD reçue du client */
+static void handle_command(ISYMessage *msg,
+                           struct sockaddr_in *src, socklen_t src_len)
+{
+    ISYMessage reply;
+    memset(&reply, 0, sizeof(reply));
+    strcpy(reply.ordre, ORDRE_RPL);
+    strncpy(reply.emetteur, "SERVER", MAX_USERNAME - 1);
 
-/* ============================================================
-   Liste groupes
-   ============================================================ */
-void envoyer_liste_groupes(const char* ip, int port) {
-    struct struct_message msg;
-    char liste[TAILLE_TEXTE] = "";
-    int count = 0;
+    char cmd[16] = {0};
+    char arg1[64] = {0};
 
-    for (int i = 0; i < nb_groupes; i++) {
-        if (groupes[i].actif) {
-            if (count > 0)
-                strncat(liste, ", ", sizeof(liste) - strlen(liste) - 1);
-            strncat(liste, groupes[i].nom, sizeof(liste) - strlen(liste) - 1);
-            count++;
+    sscanf(msg->texte, "%15s %63s", cmd, arg1);
+
+    if (strcmp(cmd, "LIST") == 0) {
+        /* Liste des groupes actifs */
+        strcpy(reply.groupe, "");
+        char buffer[ MAX_TEXT ];
+        buffer[0] = '\0';
+
+        for (int i = 0; i < MAX_GROUPS; ++i) {
+            if (groupes[i].actif) {
+                char line[64];
+                snprintf(line, sizeof(line), "%s (port %d)\n",
+                         groupes[i].nom, groupes[i].port_groupe);
+                if (strlen(buffer) + strlen(line) < sizeof(buffer))
+                    strcat(buffer, line);
+            }
+        }
+        if (buffer[0] == '\0')
+            strcpy(buffer, "Aucun groupe\n");
+
+        strncpy(reply.texte, buffer, MAX_TEXT - 1);
+    }
+    else if (strcmp(cmd, "CREATE") == 0) {
+        if (arg1[0] == '\0') {
+            strcpy(reply.texte, "Nom de groupe manquant");
+        } else if (find_group(arg1) != -1) {
+            strcpy(reply.texte, "Groupe deja existant");
+        } else {
+            int slot = -1;
+            for (int i = 0; i < MAX_GROUPS; ++i) {
+                if (!groupes[i].actif) { slot = i; break; }
+            }
+            if (slot == -1) {
+                strcpy(reply.texte, "Plus de place pour de nouveaux groupes");
+            } else {
+                groupes[slot].actif = 1;
+                strncpy(groupes[slot].nom, arg1, MAX_GROUP_NAME - 1);
+                strncpy(groupes[slot].moderateur,
+                        msg->emetteur, MAX_USERNAME - 1);
+                groupes[slot].port_groupe = GROUP_PORT_BASE + slot;
+
+                /* Optionnel : SHM stats */
+                key_t key = SHM_GROUP_KEY_BASE + slot;
+                int shm_id = shmget(key, sizeof(GroupStats),
+                                    IPC_CREAT | 0666);
+                check_fatal(shm_id < 0, "shmget group");
+                groupes[slot].shm_key = key;
+                groupes[slot].shm_id  = shm_id;
+
+                create_group_process(slot);
+
+                snprintf(reply.texte, MAX_TEXT,
+                         "Groupe %s cree sur port %d",
+                         groupes[slot].nom,
+                         groupes[slot].port_groupe);
+            }
+        }
+    }
+    else if (strcmp(cmd, "JOIN") == 0) {
+        int idx = find_group(arg1);
+        if (idx < 0) {
+            snprintf(reply.texte, MAX_TEXT,
+                     "Groupe %s introuvable", arg1);
+        } else {
+            snprintf(reply.texte, MAX_TEXT,
+                     "OK %d", groupes[idx].port_groupe);
+            strncpy(reply.groupe, groupes[idx].nom, MAX_GROUP_NAME - 1);
+        }
+    }
+    else if (strcmp(cmd, "DELETE") == 0) {
+        int idx = find_group(arg1);
+        if (idx < 0) {
+            snprintf(reply.texte, MAX_TEXT,
+                     "Groupe %s introuvable", arg1);
+        } else {
+            groupes[idx].actif = 0;
+            snprintf(reply.texte, MAX_TEXT,
+                     "Groupe %s supprime", arg1);
+            /* Ici on pourrait signaler le processus GroupeISY
+               (SIGTERM + nettoyage SHM) */
+        }
+    }
+    else {
+        snprintf(reply.texte, MAX_TEXT,
+                 "Commande inconnue: %s", cmd);
+    }
+
+    sendto(sock_srv, &reply, sizeof(reply), 0,
+           (struct sockaddr *)src, src_len);
+}
+
+int main(void)
+{
+    struct sockaddr_in addr_srv, addr_cli;
+    socklen_t addrlen = sizeof(addr_cli);
+    ISYMessage msg;
+
+    memset(groupes, 0, sizeof(groupes));
+
+    signal(SIGINT, handle_sigint);
+
+    sock_srv = create_udp_socket();
+    fill_sockaddr(&addr_srv, NULL, SERVER_PORT);
+    check_fatal(bind(sock_srv, (struct sockaddr *)&addr_srv,
+                     sizeof(addr_srv)) < 0, "bind serveur");
+
+    printf("ServeurISY en écoute sur port %d\n", SERVER_PORT);
+
+    while (running) {
+        ssize_t n = recvfrom(sock_srv, &msg, sizeof(msg), 0,
+                             (struct sockaddr *)&addr_cli, &addrlen);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            perror("recvfrom");
+            break;
+        }
+
+        if (strncmp(msg.ordre, ORDRE_CMD, 3) == 0) {
+            handle_command(&msg, &addr_cli, addrlen);
+        } else {
+            /* Messages inattendus au serveur */
+            fprintf(stderr, "Ordre inconnu recu par serveur: %s\n",
+                    msg.ordre);
         }
     }
 
-    if (count == 0)
-        strcpy(liste, "Aucun groupe");
-
-    construire_message(&msg, ORDRE_INFO, "Serveur", liste);
-    envoyer_message(sockfd_serveur, &msg, ip, port);
-}
-
-
-/* ============================================================
-   Rejoindre un groupe
-   ============================================================ */
-void traiter_connexion_groupe(const char* nom, const char* login,
-                              const char* ip_client, int port_client) {
-
-    struct struct_message msg;
-    int idx = trouver_groupe(groupes, nb_groupes, nom);
-
-    if (idx < 0) {
-        construire_message(&msg, ORDRE_ERR, "Serveur", "Groupe introuvable");
-        envoyer_message(sockfd_serveur, &msg, ip_client, port_client);
-        return;
-    }
-
-    char rep[TAILLE_TEXTE];
-    snprintf(rep, sizeof(rep), "%s:%d", ip_client, groupes[idx].port);
-
-    construire_message(&msg, ORDRE_OK, "Serveur", rep);
-    envoyer_message(sockfd_serveur, &msg, ip_client, port_client);
-
-    printf("[SERVEUR] %s rejoint '%s' via %s\n", login, nom, ip_client);
-}
-
-
-/* ============================================================
-   Fusion
-   ============================================================ */
-void fusionner_groupes(const char* data, const char* demandeur) {
-    char a[30], b[30], newname[30];
-    if (sscanf(data, "%[^:]:%[^:]:%s", a, b, newname) != 3)
-        return;
-
-    int g1 = trouver_groupe(groupes, nb_groupes, a);
-    int g2 = trouver_groupe(groupes, nb_groupes, b);
-
-    if (g1 < 0 || g2 < 0)
-        return;
-
-    kill(groupes[g2].pid_processus, SIGTERM);
-    waitpid(groupes[g2].pid_processus, NULL, 0);
-    groupes[g2].actif = 0;
-
-    creer_groupe(newname, demandeur);
-}
-
-
-/* ============================================================
-   Boucle principale
-   ============================================================ */
-void boucle_serveur() {
-    struct struct_message msg;
-    char ip_src[TAILLE_IP];
-    int port_src;
-
-    printf("\n[SERVEUR] Écoute sur %s:%d\n", IP_WSL, PORT_SERVEUR);
-    printf("[INFO] Clients → IP Windows → portproxy → %s\n\n", IP_WSL);
-
-    while (continuer) {
-        if (recevoir_message(sockfd_serveur, &msg, ip_src, &port_src) < 0)
-            continue;
-
-        if (strcmp(msg.Ordre, ORDRE_CRE) == 0) {
-            struct struct_message rep;
-            if (creer_groupe(msg.Texte, msg.Emetteur) >= 0)
-                construire_message(&rep, ORDRE_OK, "Serveur", "Groupe créé");
-            else
-                construire_message(&rep, ORDRE_ERR, "Serveur", "Erreur création");
-
-            envoyer_message(sockfd_serveur, &rep, ip_src, port_src);
-        }
-
-        else if (!strcmp(msg.Ordre, ORDRE_LST)) {
-            envoyer_liste_groupes(ip_src, port_src);
-        }
-
-        else if (!strcmp(msg.Ordre, ORDRE_JOIN)) {
-            traiter_connexion_groupe(msg.Texte, msg.Emetteur, ip_src, port_src);
-        }
-
-        else if (!strcmp(msg.Ordre, ORDRE_FUS)) {
-            fusionner_groupes(msg.Texte, msg.Emetteur);
-        }
-    }
-}
-
-
-/* ============================================================
-   MAIN
-   ============================================================ */
-int main() {
-    printf("=== SERVEUR ISY – WSL AUTO-IP ===\n");
-
-    detecter_ip_vm();
-
-    sockfd_serveur = creer_socket_udp();
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    inet_pton(AF_INET, IP_WSL, &addr.sin_addr);
-    addr.sin_port = htons(PORT_SERVEUR);
-
-    if (bind(sockfd_serveur, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("[SERVEUR] Erreur bind");
-        return EXIT_FAILURE;
-    }
-
-    /* Broadcast */
-    sockfd_broadcast = socket(AF_INET, SOCK_DGRAM, 0);
-
-    struct sockaddr_in baddr;
-    memset(&baddr, 0, sizeof(baddr));
-    baddr.sin_family = AF_INET;
-    baddr.sin_port = htons(BROADCAST_PORT);
-    baddr.sin_addr.s_addr = INADDR_ANY;
-
-    bind(sockfd_broadcast, (struct sockaddr*)&baddr, sizeof(baddr));
-
-    pthread_t tid;
-    pthread_create(&tid, NULL, thread_broadcast, NULL);
-
-    signal(SIGINT, gestionnaire_signal);
-
-    boucle_serveur();
-
+    close(sock_srv);
+    printf("ServeurISY termine\n");
     return 0;
 }

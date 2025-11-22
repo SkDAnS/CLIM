@@ -1,143 +1,120 @@
-/*
- * GroupeISY.c
- * Gestion d'un groupe de discussion - Version corrigée WSL
- */
+#include "Commun.h"
 
-#include "../include/Commun.h"
+/* Liste des clients d’un groupe */
+typedef struct {
+    int actif;
+    struct sockaddr_in addr_cli;  /* IP + port d’affichage côté client */
+    char nom[MAX_USERNAME];
+} ClientInfo;
 
-static char nom_groupe[TAILLE_NOM_GROUPE];
-static char moderateur[TAILLE_LOGIN];
-static int port_groupe;
-static int sockfd_groupe;
-static int continuer = 1;
-static Membre membres[MAX_MEMBRES_PAR_GROUPE];
-static int nb_membres = 0;
+static ClientInfo clients[MAX_CLIENTS_GROUP];
+static int sock_grp;
+static int running = 1;
+static GroupStats *stats = NULL;
 
-void gestionnaire_signal(int sig) {
-    if (sig == SIGTERM || sig == SIGINT) {
-        continuer = 0;
-    }
+void handle_sigint(int sig)
+{
+    (void)sig;
+    running = 0;
 }
 
-int ajouter_membre(const char* login, const char* ip, int port) {
-    for (int i = 0; i < nb_membres; i++) {
-        if (strcmp(membres[i].login, login) == 0) {
-            membres[i].actif = 1;
-            strncpy(membres[i].ip, ip, TAILLE_IP - 1);
-            membres[i].port = port;
-            return 0;
+static void add_client(const char *name,
+                       struct sockaddr_in *addr, int display_port)
+{
+    for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+        if (!clients[i].actif) {
+            clients[i].actif = 1;
+            strncpy(clients[i].nom, name, MAX_USERNAME - 1);
+            clients[i].addr_cli = *addr;
+            clients[i].addr_cli.sin_port = htons(display_port);
+            if (stats) stats->nb_clients++;
+            printf("Client %s ajouté (port %d)\n",
+                   name, display_port);
+            return;
         }
     }
-    
-    if (nb_membres >= MAX_MEMBRES_PAR_GROUPE) return -1;
-    
-    strncpy(membres[nb_membres].login, login, TAILLE_LOGIN - 1);
-    strncpy(membres[nb_membres].ip, ip, TAILLE_IP - 1);
-    membres[nb_membres].port = port;
-    membres[nb_membres].actif = 1;
-    membres[nb_membres].banni = 0;
-    nb_membres++;
-    
-    printf("[GROUPE %s] Nouveau membre: %s (IP: %s)\n", nom_groupe, login, ip);
-    return 1;
+    printf("Plus de place pour de nouveaux clients dans ce groupe\n");
 }
 
-void redistribuer_message(const struct struct_message* msg) {
-    int nb = 0;
-    for (int i = 0; i < nb_membres; i++) {
-        if (membres[i].actif && !membres[i].banni) {
-            envoyer_message(sockfd_groupe, (struct struct_message*)msg, membres[i].ip, membres[i].port);
-            nb++;
-        }
-    }
-    printf("[GROUPE %s] %s: redistribué à %d membres\n", nom_groupe, msg->Emetteur, nb);
-}
-
-void envoyer_liste_membres(const char* ip, int port) {
-    char liste[TAILLE_TEXTE] = "";
-    int nb = 0;
-    
-    for (int i = 0; i < nb_membres; i++) {
-        if (membres[i].actif && !membres[i].banni) {
-            if (nb > 0) strncat(liste, ",", TAILLE_TEXTE - strlen(liste) - 1);
-            strncat(liste, membres[i].login, TAILLE_TEXTE - strlen(liste) - 1);
-            nb++;
-        }
-    }
-    
-    if (nb == 0) strcpy(liste, "Aucun membre");
-    
-    struct struct_message msg;
-    construire_message(&msg, ORDRE_INFO, "Serveur", liste);
-    envoyer_message(sockfd_groupe, &msg, ip, port);
-}
-
-void boucle_groupe() {
-    struct struct_message msg;
-    char ip_client[TAILLE_IP];
-    int port_client;
-    
-    printf("[GROUPE %s] En attente de connexions sur 0.0.0.0:%d...\n", nom_groupe, port_groupe);
-    
-    while (continuer) {
-        fd_set readfds;
-        struct timeval tv;
-        FD_ZERO(&readfds);
-        FD_SET(sockfd_groupe, &readfds);
-        tv.tv_sec = 0;
-        tv.tv_usec = 100000;
-        
-        if (select(sockfd_groupe + 1, &readfds, NULL, NULL, &tv) <= 0) continue;
-        
-        if (recevoir_message(sockfd_groupe, &msg, ip_client, &port_client) < 0) continue;
-        
-        if (strcmp(msg.Ordre, ORDRE_CON) == 0) {
-            ajouter_membre(msg.Emetteur, ip_client, port_client);
-            
-        } else if (strcmp(msg.Ordre, ORDRE_MES) == 0) {
-            redistribuer_message(&msg);
-            
-        } else if (strcmp(msg.Ordre, ORDRE_LMEM) == 0) {
-            envoyer_liste_membres(ip_client, port_client);
+static void broadcast_message(ISYMessage *msg)
+{
+    for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+        if (clients[i].actif) {
+            sendto(sock_grp, msg, sizeof(*msg), 0,
+                   (struct sockaddr *)&clients[i].addr_cli,
+                   sizeof(clients[i].addr_cli));
         }
     }
 }
 
-int main(int argc, char* argv[]) {
-    if (argc < 4) return EXIT_FAILURE;
-    
-    strncpy(nom_groupe, argv[1], TAILLE_NOM_GROUPE - 1);
-    strncpy(moderateur, argv[2], TAILLE_LOGIN - 1);
-    port_groupe = atoi(argv[3]);
-    
-    printf("[GROUPE %s] Démarrage (Mod: %s, Port: %d)\n", nom_groupe, moderateur, port_groupe);
-    
-    sockfd_groupe = creer_socket_udp();
-    if (sockfd_groupe < 0) {
-        fprintf(stderr, "[GROUPE %s] Erreur création socket\n", nom_groupe);
+int main(int argc, char *argv[])
+{
+    if (argc < 4) {
+        fprintf(stderr,
+                "Usage: %s <nom_groupe> <moderateur> <port>\n",
+                argv[0]);
         return EXIT_FAILURE;
     }
-    
-    // IMPORTANT : Bind sur 0.0.0.0 pour écouter sur TOUTES les interfaces
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0
-    addr.sin_port = htons(port_groupe);
-    
-    if (bind(sockfd_groupe, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("[GROUPE] Erreur bind");
-        close(sockfd_groupe);
-        return EXIT_FAILURE;
+
+    const char *nom_groupe = argv[1];
+    const char *moderateur = argv[2];
+    int port = atoi(argv[3]);
+
+    memset(clients, 0, sizeof(clients));
+
+    /* Attache SHM pour statistiques (optionnel) */
+    key_t key = SHM_GROUP_KEY_BASE + (port - GROUP_PORT_BASE);
+    int shm_id = shmget(key, sizeof(GroupStats), 0666);
+    if (shm_id >= 0) {
+        stats = shmat(shm_id, NULL, 0);
+        if (stats != (void *)-1) {
+            stats->nb_clients = 0;
+            stats->nb_messages = 0;
+        } else {
+            stats = NULL;
+        }
     }
-    
-    signal(SIGTERM, gestionnaire_signal);
-    signal(SIGINT, gestionnaire_signal);
-    
-    boucle_groupe();
-    
-    close(sockfd_groupe);
-    printf("[GROUPE %s] Terminé\n", nom_groupe);
-    
-    return EXIT_SUCCESS;
+
+    signal(SIGINT, handle_sigint);
+
+    sock_grp = create_udp_socket();
+    struct sockaddr_in addr_grp, addr_src;
+    socklen_t addrlen = sizeof(addr_src);
+
+    fill_sockaddr(&addr_grp, NULL, port);
+    check_fatal(bind(sock_grp, (struct sockaddr *)&addr_grp,
+                     sizeof(addr_grp)) < 0, "bind groupe");
+
+    printf("GroupeISY '%s' lancé, moderateur=%s, port=%d\n",
+           nom_groupe, moderateur, port);
+
+    ISYMessage msg;
+
+    while (running) {
+        ssize_t n = recvfrom(sock_grp, &msg, sizeof(msg), 0,
+                             (struct sockaddr *)&addr_src, &addrlen);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            perror("recvfrom groupe");
+            break;
+        }
+
+        if (strncmp(msg.ordre, ORDRE_CON, 3) == 0) {
+            /* msg.texte contient le port d’affichage du client */
+            int display_port = atoi(msg.texte);
+            add_client(msg.emetteur, &addr_src, display_port);
+        }
+        else if (strncmp(msg.ordre, ORDRE_MSG, 3) == 0) {
+            if (stats) stats->nb_messages++;
+            strncpy(msg.groupe, nom_groupe, MAX_GROUP_NAME - 1);
+            broadcast_message(&msg);
+        }
+    }
+
+    close(sock_grp);
+    if (stats && stats != (void *)-1)
+        shmdt(stats);
+
+    printf("GroupeISY '%s' termine\n", nom_groupe);
+    return 0;
 }

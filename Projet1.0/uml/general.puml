@@ -3,26 +3,33 @@ left to right direction
 
 actor Utilisateur
 actor Gestionnaire
-actor Administration
 
-usecase "Créer groupe" as UC_Create
-usecase "Rejoindre groupe" as UC_Join
-usecase "Lister groupes" as UC_List
-usecase "Dialoguer sur un groupe" as UC_Chat
-usecase "Quitter groupe" as UC_Leave
+rectangle "Utilisation" {
+  usecase "Créer groupe" as UC_Creer
+  usecase "Lister les groupes" as UC_ListerGroupes
+  usecase "Rejoindre un groupe" as UC_Rejoindre
+  usecase "Quitter un groupe" as UC_Quitter
+  usecase "Ecrire un message à un groupe" as UC_EcrireMsg
+  usecase "Lire les messages d'un groupe" as UC_LireMsg
+  usecase "Lister les membres d'un groupe" as UC_ListerMembres
+}
 
-usecase "Supprimer groupe" as UC_Delete
-usecase "Fusionner groupes" as UC_Merge
-usecase "Modérer membre" as UC_Moderate
+rectangle "Administration" {
+  usecase "Supprimer un groupe" as UC_Supprimer
+  usecase "Fusionner deux groupes" as UC_Fusionner
+  usecase "Modérer un membre" as UC_Moderer
+}
 
-Utilisateur --> UC_Create
-Utilisateur --> UC_Join
-Utilisateur --> UC_List
-Utilisateur --> UC_Chat
-Utilisateur --> UC_Leave
+Utilisateur --> UC_Creer
+Utilisateur --> UC_ListerGroupes
+Utilisateur --> UC_Rejoindre
+Utilisateur --> UC_Quitter
+Utilisateur --> UC_EcrireMsg
+Utilisateur --> UC_LireMsg
+Utilisateur --> UC_ListerMembres
 
-Gestionnaire --> UC_Delete
-Gestionnaire --> UC_Merge
-Gestionnaire --> UC_Moderate
+Gestionnaire --> UC_Supprimer
+Gestionnaire --> UC_Fusionner
+Gestionnaire --> UC_Moderer
 
 @enduml

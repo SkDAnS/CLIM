@@ -1,8 +1,3 @@
-/*
- * Commun.h
- * Fichier d'en-tête commun pour le projet ISY Messagerie
- */
-
 #ifndef COMMUN_H
 #define COMMUN_H
 
@@ -10,101 +5,93 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <signal.h>
+
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
-#include <sys/sem.h>
 #include <sys/wait.h>
-#include <arpa/inet.h>
+
+#include <sys/socket.h>
 #include <netinet/in.h>
-#include <errno.h>
-#include <time.h>
+#include <arpa/inet.h>
 
-/* CONSTANTES */
-#define PORT_SERVEUR 5353
-#define PORT_GROUPE_BASE 8001
-#define MAX_GROUPES 50
-#define MAX_MEMBRES_PAR_GROUPE 20
+/* Paramètres généraux */
 
-#define TAILLE_ORDRE 4
-#define TAILLE_EMETTEUR 20
-#define TAILLE_TEXTE 100
-#define TAILLE_NOM_GROUPE 30
-#define TAILLE_LOGIN 20
-#define TAILLE_IP 16
+#define SERVER_PORT       8000        /* Port du ServeurISY */
+#define GROUP_PORT_BASE   8100        /* Port de base des groupes */
+#define MAX_GROUPS        10
+#define MAX_GROUP_NAME    32
+#define MAX_USERNAME      20
+#define MAX_TEXT          100
+#define MAX_CLIENTS_GROUP 16
 
-/* ORDRES */
-#define ORDRE_CON "CON"
-#define ORDRE_DECI "DEC"
-#define ORDRE_MES "MES"
-#define ORDRE_CRE "CRE"
-#define ORDRE_SUP "SUP"
-#define ORDRE_LST "LST"
-#define ORDRE_JOIN "JOI"
-#define ORDRE_QUIT "QUI"
-#define ORDRE_DEL "DEL"
-#define ORDRE_FUS "FUS"
-#define ORDRE_LMEM "LME"
-#define ORDRE_OK "OK"
-#define ORDRE_ERR "ERR"
-#define ORDRE_INFO "INF"
+#define SHM_CLIENT_KEY    0x1234      /* SHM ClientISY <-> AffichageISY */
+#define SHM_GROUP_KEY_BASE 0x2000     /* SHM ServeurISY <-> GroupeISY (optionnel) */
 
-/* STRUCTURES */
-struct struct_message {
-    char Ordre[TAILLE_ORDRE];
-    char Emetteur[TAILLE_EMETTEUR];
-    char Texte[TAILLE_TEXTE];
-};
+/* Ordres possible dans les messages réseau */
+#define ORDRE_CMD "CMD"   /* Commande envoyée au serveur */
+#define ORDRE_RPL "RPL"   /* Réponse serveur */
+#define ORDRE_CON "CON"   /* Connexion à un groupe (auprès de GroupeISY) */
+#define ORDRE_MSG "MES"   /* Message normal d’un utilisateur */
 
+/* Structure de message réseau (énoncé) */
 typedef struct {
-    char login[TAILLE_LOGIN];
-    char ip[TAILLE_IP];
-    int port;
-    int actif;
-    int banni;
-} Membre;
+    char ordre[4];                 /* "CMD", "MES", ... (3 + '\0') */
+    char emetteur[MAX_USERNAME];   /* Nom utilisateur */
+    char groupe[MAX_GROUP_NAME];   /* Nom du groupe si besoin */
+    char texte[MAX_TEXT];          /* Commande ou contenu du message */
+} ISYMessage;
 
+/* Description d’un groupe côté serveur */
 typedef struct {
-    char nom[TAILLE_NOM_GROUPE];
-    char moderateur[TAILLE_LOGIN];
-    int port;
-    pid_t pid_processus;
-    int nb_membres;
-    int actif;
-    Membre membres[MAX_MEMBRES_PAR_GROUPE];
-} Groupe;
+    int  actif;
+    char nom[MAX_GROUP_NAME];
+    char moderateur[MAX_USERNAME];
+    int  port_groupe;              /* port UDP du GroupeISY */
+    key_t shm_key;                 /* pour SHM groupe (statistiques, optionnel) */
+    int   shm_id;
+} GroupeInfo;
 
+/* SHM ClientISY <-> AffichageISY
+ * Minimal : seulement un flag pour demander l’arrêt de l’affichage. */
 typedef struct {
-    int actif;
-    int commande;
-    char cible[TAILLE_LOGIN];
-    char groupe_fusion[TAILLE_NOM_GROUPE];
-    int nb_membres;
-    Membre membres[MAX_MEMBRES_PAR_GROUPE];
-} SHM_Groupe;
+    int running;                   /* 1 = continuer, 0 = arrêter */
+} ClientDisplayShm;
 
+/* SHM ServeurISY <-> GroupeISY (ex : statistiques) – optionnel */
 typedef struct {
-    int actif;
-    int terminer;
-    char nom_groupe[TAILLE_NOM_GROUPE];
-    char ip_groupe[TAILLE_IP];
-    int port_groupe;
-} SHM_Affichage;
+    int nb_messages;
+    int nb_clients;
+} GroupStats;
 
-/* PROTOTYPES */
-char get_avatar_from_ip(const char* ip);
-int creer_socket_udp();
-int bind_socket(int sockfd, int port);
-int envoyer_message(int sockfd, struct struct_message* msg, const char* ip_dest, int port_dest);
-int recevoir_message(int sockfd, struct struct_message* msg, char* ip_src, int* port_src);
-void construire_message(struct struct_message* msg, const char* ordre, const char* emetteur, const char* texte);
-void nettoyer_chaine(char* chaine);
-void jouer_son_notification();
-int trouver_groupe(Groupe groupes[], int nb_groupes, const char* nom);
-void get_local_ip(char* buffer, size_t size);
+/* Fonctions utilitaires communes */
 
+static inline void check_fatal(int cond, const char *msg)
+{
+    if (cond) {
+        perror(msg);
+        exit(EXIT_FAILURE);
+    }
+}
 
+static inline int create_udp_socket(void)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    check_fatal(sock < 0, "socket");
+    return sock;
+}
 
-#endif
+static inline void fill_sockaddr(struct sockaddr_in *addr,
+                                 const char *ip, int port)
+{
+    memset(addr, 0, sizeof(*addr));
+    addr->sin_family = AF_INET;
+    addr->sin_port   = htons(port);
+    addr->sin_addr.s_addr = (ip == NULL) ?
+                            htonl(INADDR_ANY) :
+                            inet_addr(ip);
+}
+
+#endif /* COMMUN_H */
