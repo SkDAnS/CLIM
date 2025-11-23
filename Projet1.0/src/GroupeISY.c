@@ -1,4 +1,4 @@
-#include "Commun.h"
+#include "../include/Commun.h"
 
 /* Liste des clients d’un groupe */
 typedef struct {

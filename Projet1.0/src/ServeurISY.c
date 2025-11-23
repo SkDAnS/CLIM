@@ -1,4 +1,4 @@
-#include "Commun.h"
+#include "../include/Commun.h"
 
 static int sock_srv;
 static GroupeInfo groupes[MAX_GROUPS];
