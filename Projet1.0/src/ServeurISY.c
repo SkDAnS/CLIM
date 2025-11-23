@@ -193,25 +193,36 @@ int main(void)
 
         ssize_t nb = recvfrom(sock_broadcast, buffer, sizeof(buffer)-1, MSG_DONTWAIT, (struct sockaddr*)&addr_discovery, &len_discovery);
 
-        if (nb > 0) {
+                if (nb > 0) {
             buffer[nb] = '\0';
 
             if (strcmp(buffer, "WHO_IS_SERVER?") == 0) {
+
+                /* Trouver l'IP du serveur */
                 char ip_reply[64];
-                /* IP locale détectée = addr_srv.sin_addr */
-                inet_ntop(AF_INET, &addr_srv.sin_addr, ip_reply, sizeof(ip_reply));
+                /* Récupération de l'IP locale du serveur */
+                struct sockaddr_in tmp;
+                socklen_t tmplen = sizeof(tmp);
+                getsockname(sock_srv, (struct sockaddr *)&tmp, &tmplen);
+
+                inet_ntop(AF_INET, &tmp.sin_addr, ip_reply, sizeof(ip_reply));
 
                 char response[128];
                 snprintf(response, sizeof(response), "SERVER_HERE:%s", ip_reply);
 
-                sendto(sock_broadcast, response, strlen(response), 0,
-                    (struct sockaddr*)&addr_discovery, len_discovery);
+                sendto(sock_broadcast,
+                       response,
+                       strlen(response),
+                       0,
+                       (struct sockaddr *)&addr_discovery,
+                       len_discovery);
 
                 printf("[BROADCAST] Requête de %s → réponse \"%s\"\n",
-                    inet_ntoa(addr_discovery.sin_addr),
-                    response);
+                       inet_ntoa(addr_discovery.sin_addr),
+                       response);
             }
         }
+
         /*=== FIN TRAITEMENT DES REQUÊTES DE DÉCOUVERTE ===*/
 
         ssize_t n = recvfrom(sock_srv, &msg, sizeof(msg), 0,
