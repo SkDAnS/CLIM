@@ -3,6 +3,10 @@
 static int sock_srv;
 static GroupeInfo groupes[MAX_GROUPS];
 static int running = 1;
+//les deux prochains pour la recherche du serveur sur le réseaux 
+static int sock_broadcast;
+#define DISCOVERY_PORT 8005
+
 
 /* Nettoyage sur CTRL-C */
 void handle_sigint(int sig)
@@ -161,12 +165,55 @@ int main(void)
 
     sock_srv = create_udp_socket();
     fill_sockaddr(&addr_srv, NULL, SERVER_PORT);
-    check_fatal(bind(sock_srv, (struct sockaddr *)&addr_srv,
-                     sizeof(addr_srv)) < 0, "bind serveur");
+    check_fatal(bind(sock_srv, (struct sockaddr *)&addr_srv, sizeof(addr_srv)) < 0, "bind serveur");
+
+    /* === SOCKET POUR LA DÉCOUVERTE AUTOMATIQUE === */
+    sock_broadcast = create_udp_socket();
+
+    /* Autoriser le broadcast */
+    int opt = 1;
+    setsockopt(sock_broadcast, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+
+    struct sockaddr_in addr_broad;
+    fill_sockaddr(&addr_broad, NULL, DISCOVERY_PORT);
+
+    check_fatal(bind(sock_broadcast, (struct sockaddr *)&addr_broad, sizeof(addr_broad)) < 0, "bind discovery");
+
+    printf("[BROADCAST] En écoute sur port %d…\n", DISCOVERY_PORT);
+    /* === FIN SOCKET POUR LA DÉCOUVERTE AUTOMATIQUE === */
+
 
     printf("ServeurISY en écoute sur port %d\n", SERVER_PORT);
 
     while (running) {
+        /* === TRAITEMENT DES REQUÊTES DE DÉCOUVERTE === */
+        struct sockaddr_in addr_discovery;
+        socklen_t len_discovery = sizeof(addr_discovery);
+        char buffer[64];
+
+        ssize_t nb = recvfrom(sock_broadcast, buffer, sizeof(buffer)-1, MSG_DONTWAIT, (struct sockaddr*)&addr_discovery, &len_discovery);
+
+        if (nb > 0) {
+            buffer[nb] = '\0';
+
+            if (strcmp(buffer, "WHO_IS_SERVER?") == 0) {
+                char ip_reply[64];
+                /* IP locale détectée = addr_srv.sin_addr */
+                inet_ntop(AF_INET, &addr_srv.sin_addr, ip_reply, sizeof(ip_reply));
+
+                char response[128];
+                snprintf(response, sizeof(response), "SERVER_HERE:%s", ip_reply);
+
+                sendto(sock_broadcast, response, strlen(response), 0,
+                    (struct sockaddr*)&addr_discovery, len_discovery);
+
+                printf("[BROADCAST] Requête de %s → réponse \"%s\"\n",
+                    inet_ntoa(addr_discovery.sin_addr),
+                    response);
+            }
+        }
+        /*=== FIN TRAITEMENT DES REQUÊTES DE DÉCOUVERTE ===*/
+
         ssize_t n = recvfrom(sock_srv, &msg, sizeof(msg), 0,
                              (struct sockaddr *)&addr_cli, &addrlen);
         if (n < 0) {

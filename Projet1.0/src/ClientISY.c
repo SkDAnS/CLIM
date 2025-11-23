@@ -11,6 +11,62 @@ static int sock_cli;
 static struct sockaddr_in addr_srv;
 static ClientDisplayShm *shm = NULL;
 
+
+
+
+
+
+//Port de dévouverte pour la recherche du serveur
+#define DISCOVERY_PORT 8005
+
+//Fonction pour la découverte du serveur
+static int discover_server_ip(char *out_ip)
+{
+    int sock = create_udp_socket();
+
+    /* Autoriser broadcast */
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+
+    /* Adresse broadcast */
+    struct sockaddr_in addr_bc;
+    fill_sockaddr(&addr_bc, "255.255.255.255", DISCOVERY_PORT);
+
+    const char *msg = "WHO_IS_SERVER?";
+    sendto(sock, msg, strlen(msg), 0,
+           (struct sockaddr*)&addr_bc, sizeof(addr_bc));
+
+    /* Attend une réponse */
+    struct sockaddr_in addr_from;
+    socklen_t len = sizeof(addr_from);
+    char buffer[128];
+
+    struct timeval tv = {1, 0}; /* timeout 1s */
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    ssize_t n = recvfrom(sock, buffer, sizeof(buffer)-1, 0,
+                         (struct sockaddr*)&addr_from, &len);
+
+    close(sock);
+
+    if (n <= 0) {
+        return 0; /* pas trouvé */
+    }
+
+    buffer[n] = '\0';
+
+    if (strncmp(buffer, "SERVER_HERE:", 12) == 0) {
+        strcpy(out_ip, buffer + 12);
+        return 1;
+    }
+
+    return 0;
+}
+
+
+
+
+
 /* Lecture simple d’un fichier de config :
  * username=...
  * server_ip=...
@@ -150,8 +206,19 @@ int main(void)
 {
     load_config("config/client_template.conf");
 
-    printf("ClientISY – utilisateur %s, serveur %s, port_affichage=%d\n",
-           cfg.username, cfg.server_ip, cfg.display_port);
+    /* === Tentative de découverte automatique du serveur === */
+    char discovered_ip[64];
+    if (discover_server_ip(discovered_ip)) {
+        printf("[AUTO] Serveur détecté : %s\n", discovered_ip);
+        strcpy(cfg.server_ip, discovered_ip);
+    } else {
+        printf("[AUTO] Aucun serveur détecté. Utilisation de l’IP du fichier conf : %s\n",
+            cfg.server_ip);
+    }
+    
+    printf("ClientISY – utilisateur %s, serveur=%s, port_affichage=%d\n",
+        cfg.username, cfg.server_ip, cfg.display_port);
+    /* === FIN Tentative de découverte automatique du serveur === */
 
     /* SHM client-affichage */
     int shm_id = shmget(SHM_CLIENT_KEY, sizeof(ClientDisplayShm),
