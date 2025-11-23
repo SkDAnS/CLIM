@@ -83,7 +83,7 @@ static pid_t start_affichage(void)
     if (pid == 0) {
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
-        execl("./AffichageISY", "./AffichageISY",
+        execl("bin/AffichageISY", "bin/AffichageISY",
               port_str, cfg.username, (char *)NULL);
         perror("execl AffichageISY");
         _exit(EXIT_FAILURE);
@@ -107,11 +107,11 @@ static void connect_to_group(const char *group_name, int port_groupe)
     strncpy(msg.groupe, group_name, MAX_GROUP_NAME - 1);
     snprintf(msg.texte, sizeof(msg.texte), "%d", cfg.display_port);
 
-    //DEBUT DEBUG
+    /*//DEBUT DEBUG
     char ip_grp[64];
     inet_ntop(AF_INET, &addr_grp.sin_addr, ip_grp, sizeof(ip_grp));
     printf("[DEBUG CLIENT] Envoi CON vers %s:%d (groupe=%s, user=%s, display_port=%d)\n", ip_grp, ntohs(addr_grp.sin_port), group_name, cfg.username, cfg.display_port);
-    //FIN DEBUG
+    //FIN DEBUG*/
 
     sendto(sock_cli, &msg, sizeof(msg), 0, (struct sockaddr *)&addr_grp, sizeof(addr_grp));
 }

@@ -1,34 +1,44 @@
-CC      = gcc
-CFLAGS  = -Wall -Wextra -std=c11 -O2 -Iinclude
-LDFLAGS = 
+CC		= gcc
+CFLAGS	= -Wall -Wextra -std=c11 -O2 -Iinclude
 
-SRCDIR  = src
-INCDIR  = include
-OBJDIR  = obj
+SRCDIR	= src
+INCDIR	= include
+OBJDIR	= obj
+BINDIR	= bin
 
-SOURCES = $(SRCDIR)/ServeurISY.c $(SRCDIR)/GroupeISY.c \
+SOURCES	= $(SRCDIR)/ServeurISY.c $(SRCDIR)/GroupeISY.c \
           $(SRCDIR)/ClientISY.c $(SRCDIR)/AffichageISY.c
-OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
+OBJECTS	= $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-TARGETS = ServeurISY GroupeISY ClientISY AffichageISY
+TARGETS	= $(BINDIR)/ServeurISY $(BINDIR)/GroupeISY \
+          $(BINDIR)/ClientISY $(BINDIR)/AffichageISY
 
-all: $(TARGETS)
+all: $(BINDIR) $(OBJDIR) $(TARGETS)
 
+$(BINDIR):
+	mkdir -p $(BINDIR)
+
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
+
+# Compilation des .o
 $(OBJDIR)/%.o: $(SRCDIR)/%.c $(INCDIR)/Commun.h
-	@mkdir -p $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-ServeurISY: $(OBJDIR)/ServeurISY.o
-	$(CC) $^ -o $@ $(LDFLAGS)
+# Liens vers bin/
+$(BINDIR)/ServeurISY: $(OBJDIR)/ServeurISY.o
+	$(CC) $^ -o $@
 
-GroupeISY: $(OBJDIR)/GroupeISY.o
-	$(CC) $^ -o $@ $(LDFLAGS)
+$(BINDIR)/GroupeISY: $(OBJDIR)/GroupeISY.o
+	$(CC) $^ -o $@
 
-ClientISY: $(OBJDIR)/ClientISY.o
-	$(CC) $^ -o $@ $(LDFLAGS)
+$(BINDIR)/ClientISY: $(OBJDIR)/ClientISY.o
+	$(CC) $^ -o $@
 
-AffichageISY: $(OBJDIR)/AffichageISY.o
-	$(CC) $^ -o $@ $(LDFLAGS)
+$(BINDIR)/AffichageISY: $(OBJDIR)/AffichageISY.o
+	$(CC) $^ -o $@
 
 clean:
-	rm -rf $(OBJDIR) $(TARGETS)
+	rm -rf $(OBJDIR) $(BINDIR)
+
+.PHONY: all clean

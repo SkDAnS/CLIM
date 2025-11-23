@@ -32,7 +32,7 @@ static int create_group_process(int index)
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", groupes[index].port_groupe);
 
-        execl("./GroupeISY", "./GroupeISY",
+        execl("bin/GroupeISY", "bin/GroupeISY",
               groupes[index].nom,
               groupes[index].moderateur,
               port_str,

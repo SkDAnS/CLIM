@@ -98,13 +98,13 @@ int main(int argc, char *argv[])
             break;
         }
 
-        //DEBUT DEBUG
+        /*//DEBUT DEBUG
         addrlen = sizeof(addr_src);               // <-- ajoute ça à chaque tour
 
         char ip_src[64];
         inet_ntop(AF_INET, &addr_src.sin_addr, ip_src, sizeof(ip_src));
         printf("[DEBUG GROUPE] paquet reçu ordre='%s' emetteur='%s' texte='%s' depuis %s:%d\n", msg.ordre, msg.emetteur, msg.texte, ip_src, ntohs(addr_src.sin_port));
-        //FIN DEBUG
+        //FIN DEBUG*/
 
         if (strncmp(msg.ordre, ORDRE_CON, 3) == 0) {
             /* msg.texte contient le port d’affichage du client */
