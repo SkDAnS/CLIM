@@ -96,18 +96,24 @@ static pid_t start_affichage(void)
 static void connect_to_group(const char *group_name, int port_groupe)
 {
     struct sockaddr_in addr_grp;
-    fill_sockaddr(&addr_grp, cfg.server_ip, port_groupe);
+    //fill_sockaddr(&addr_grp, cfg.server_ip, port_groupe);
+    fill_sockaddr(&addr_grp,"192.168.0.17", port_groupe);
+
 
     ISYMessage msg;
     memset(&msg, 0, sizeof(msg));
     strcpy(msg.ordre, ORDRE_CON);
     strncpy(msg.emetteur, cfg.username, MAX_USERNAME - 1);
     strncpy(msg.groupe, group_name, MAX_GROUP_NAME - 1);
-    snprintf(msg.texte, sizeof(msg.texte),
-             "%d", cfg.display_port);
+    snprintf(msg.texte, sizeof(msg.texte), "%d", cfg.display_port);
 
-    sendto(sock_cli, &msg, sizeof(msg), 0,
-           (struct sockaddr *)&addr_grp, sizeof(addr_grp));
+    //DEBUT DEBUG
+    char ip_grp[64];
+    inet_ntop(AF_INET, &addr_grp.sin_addr, ip_grp, sizeof(ip_grp));
+    printf("[DEBUG CLIENT] Envoi CON vers %s:%d (groupe=%s, user=%s, display_port=%d)\n", ip_grp, ntohs(addr_grp.sin_port), group_name, cfg.username, cfg.display_port);
+    //FIN DEBUG
+
+    sendto(sock_cli, &msg, sizeof(msg), 0, (struct sockaddr *)&addr_grp, sizeof(addr_grp));
 }
 
 /* Envoi d’un message MES au groupe */
