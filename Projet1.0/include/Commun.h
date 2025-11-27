@@ -77,6 +77,8 @@ void nettoyer_chaine(char *s);
 /* ================= AVATARS & NOTIFICATIONS ================= */
 const char* get_avatar_from_ip(const char* ip);
 void jouer_son_notification(void);
+void load_server_config(char *ip_out, int *port_out);
+
 
 
 #endif

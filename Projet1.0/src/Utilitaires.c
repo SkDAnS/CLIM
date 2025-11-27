@@ -138,3 +138,31 @@ void jouer_son_notification(void)
     fflush(stdout);
 }
 
+
+/* ============================================================
+   LECTURE CONFIG SERVEUR
+   ============================================================ */
+
+void load_server_config(char *ip_out, int *port_out)
+{
+    FILE *f = fopen("config/serveur.conf", "r");
+    if (!f) {
+        perror("serveur.conf");
+        exit(1);
+    }
+
+    char key[64], val[128], line[256];
+    while (fgets(line, sizeof(line), f)) {
+
+        if (sscanf(line, "%63[^=]=%127s", key, val) == 2) {
+
+            if (!strcmp(key, "IP"))
+                strncpy(ip_out, val, TAILLE_IP - 1);
+
+            else if (!strcmp(key, "PORT"))
+                *port_out = atoi(val);
+        }
+    }
+
+    fclose(f);
+}

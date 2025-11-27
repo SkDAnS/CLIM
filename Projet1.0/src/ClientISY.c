@@ -12,6 +12,7 @@ static char SERVER_IP[TAILLE_IP];
 static char CLIENT_IP[TAILLE_IP];
 static char login[TAILLE_LOGIN];
 static int display_port = 9001;
+static int PORT_SERVEUR_CFG = 8000;
 
 static int sockfd_client;
 static int continuer = 1;
@@ -53,7 +54,7 @@ const char* get_avatar(const char* login) {
 
 void load_client_config(char *client_ip_out, char *username_out, int *display_port_out)
 {
-    FILE *f = fopen("client.conf", "r");
+    FILE *f = fopen("config/client.conf", "r");
     if (!f) {
         perror("[ERREUR] client.conf");
         exit(1);
@@ -79,7 +80,7 @@ void load_client_config(char *client_ip_out, char *username_out, int *display_po
 
 void save_client_config(const char *client_ip, const char *username, int display_port)
 {
-    FILE *f = fopen("client.conf", "w");
+    FILE *f = fopen("config/client.conf", "w");
     if (!f) {
         perror("[ERREUR] écriture client.conf");
         return;
@@ -98,6 +99,7 @@ void gestionnaire_signal(int sig) {
     if (sig == SIGINT) {
         printf("\n[CLIENT] CTRL-C...\n");
         continuer = 0;
+        exit(0);
     }
 }
 
@@ -282,7 +284,8 @@ int main(void) {
     printf("=== CLIENT ISY ===\n");
 
     load_client_config(CLIENT_IP, login, &display_port);
-    
+    load_server_config(SERVER_IP, &PORT_SERVEUR_CFG);
+
     printf("Client IP  : %s\n", CLIENT_IP);
     printf("Username   : %s\n", login);
     printf("Serveur IP : %s\n", SERVER_IP);
