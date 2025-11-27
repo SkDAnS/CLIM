@@ -4,6 +4,7 @@
  */
 
 #include "../include/Commun.h"
+#include <sys/select.h>
 
 static char nom_groupe[TAILLE_NOM_GROUPE];
 static char ip_groupe[TAILLE_IP];
@@ -18,22 +19,21 @@ void gestionnaire_signal(int sig) {
     }
 }
 
-void afficher_message_avec_avatar(const struct struct_message* msg, const char* ip_emetteur) {
-    char avatar = get_avatar_from_ip(ip_emetteur);
-    
+void afficher_message_avec_avatar(const struct_message* msg, const char* ip_emetteur)
+{
+    const char* avatar = get_avatar_from_ip(ip_emetteur);
+
     if (strcmp(msg->Ordre, ORDRE_MES) == 0) {
-        printf("[%c] %s: %s\n", avatar, msg->Emetteur, msg->Texte);
-        fflush(stdout);
-        
-        /* Notification sonore si ce n'est pas mon message */
-        if (strcmp(msg->Emetteur, mon_login) != 0) {
-            jouer_son_notification();
-        }
-    } else if (strcmp(msg->Ordre, ORDRE_INFO) == 0) {
-        printf("[!] %s\n", msg->Texte);
-        fflush(stdout);
+        jouer_son_notification();
+        printf("[%s] %s : %s\n", avatar, msg->Emetteur, msg->Texte);
     }
+    else if (strcmp(msg->Ordre, ORDRE_INFO) == 0) {
+        printf("[INFO] %s\n", msg->Texte);
+    }
+
+    fflush(stdout);
 }
+
 
 int main(int argc, char* argv[]) {
     if (argc < 5) return EXIT_FAILURE;
@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
     strncpy(mon_login, argv[4], TAILLE_LOGIN - 1);
     
     sockfd_affichage = creer_socket_udp();
-    if (sockfd_affichage < 0 || bind_socket(sockfd_affichage, 0) < 0) {
+    if (sockfd_affichage < 0 || bind_socket(sockfd_affichage, "0.0.0.0", 0) < 0) {
         return EXIT_FAILURE;
     }
     
@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
     printf("  GROUPE: %s\n", nom_groupe);
     printf("========================================\n\n");
     
-    struct struct_message msg;
+    struct_message msg;
     char ip_emetteur[TAILLE_IP];
     int port_emetteur;
     

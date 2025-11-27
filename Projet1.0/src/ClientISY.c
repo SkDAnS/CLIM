@@ -121,7 +121,7 @@ void creer_groupe() {
     nettoyer_chaine(nom);
     if (strlen(nom) == 0) return;
 
-    struct struct_message msg, rep;
+    struct_message msg, rep;
     construire_message(&msg, ORDRE_CRE, login, nom);
     envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
@@ -136,7 +136,7 @@ void creer_groupe() {
 }
 
 void lister_groupes() {
-    struct struct_message msg, rep;
+    struct_message msg, rep;
     construire_message(&msg, ORDRE_LST, login, "");
     envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
@@ -153,7 +153,7 @@ void rejoindre_groupe() {
     nettoyer_chaine(nom);
     if (strlen(nom) == 0) return;
 
-    struct struct_message msg, rep;
+    struct_message msg, rep;
     construire_message(&msg, ORDRE_JOIN, login, nom);
     envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
@@ -177,7 +177,7 @@ void rejoindre_groupe() {
     groupes[idx].port = port_grp;
     groupes[idx].actif = 1;
 
-    struct struct_message msg_con;
+    struct_message msg_con;
     construire_message(&msg_con, ORDRE_CON, login, "");
     envoyer_message(sockfd_client, &msg_con, ip_grp, port_grp);
 
@@ -210,7 +210,7 @@ void fusionner_groupes() {
     snprintf(data, sizeof(data), "%s:%s",
              groupes[g1].nom, groupes[g2].nom);
 
-    struct struct_message msg;
+    struct_message msg;
     construire_message(&msg, ORDRE_FUS, login, data);
     envoyer_message(sockfd_client, &msg, SERVER_IP, PORT_SERVEUR);
 
@@ -237,7 +237,7 @@ void dialoguer() {
 
     fd_set readfds;
     struct timeval tv;
-    struct struct_message msg;
+    struct_message msg;
     char buffer[TAILLE_TEXTE];
     char ip_src[TAILLE_IP];
     int port_src;
@@ -282,8 +282,7 @@ int main(void) {
     printf("=== CLIENT ISY ===\n");
 
     load_client_config(CLIENT_IP, login, &display_port);
-    load_server_config(SERVER_IP); /* Serveur lu dans serveur.conf */
-
+    
     printf("Client IP  : %s\n", CLIENT_IP);
     printf("Username   : %s\n", login);
     printf("Serveur IP : %s\n", SERVER_IP);

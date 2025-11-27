@@ -24,6 +24,12 @@
 /* ---------------- STRUCTURES ---------------- */
 
 typedef struct {
+    char Ordre[16];
+    char Emetteur[TAILLE_LOGIN];
+    char Texte[TAILLE_TEXTE];
+} struct_message;   // ⚡ DOIT ÊTRE DÉFINI AVANT TOUTE UTILISATION
+
+typedef struct {
     char login[TAILLE_LOGIN];
     char ip[TAILLE_IP];
     int port;
@@ -38,12 +44,6 @@ typedef struct {
     int actif;
     pid_t pid_processus;
 } Groupe;
-
-typedef struct {
-    char Ordre[16];
-    char Emetteur[TAILLE_LOGIN];
-    char Texte[TAILLE_TEXTE];
-} struct_message;
 
 /* ---------------- ORDRES ---------------- */
 
@@ -73,5 +73,10 @@ void construire_message(struct_message *msg,
 
 int trouver_groupe(Groupe *groupes, int nb, const char *nom);
 void nettoyer_chaine(char *s);
+
+/* ================= AVATARS & NOTIFICATIONS ================= */
+const char* get_avatar_from_ip(const char* ip);
+void jouer_son_notification(void);
+
 
 #endif

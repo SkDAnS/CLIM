@@ -1,6 +1,8 @@
 #include "../include/Commun.h"
 #include <arpa/inet.h>
 #include <string.h>
+#include <wchar.h>
+#include <locale.h>
 
 /* ---------------------------------------------------------
    Socket UDP
@@ -15,28 +17,25 @@ int creer_socket_udp()
 /* ---------------------------------------------------------
    Bind standardisé
 --------------------------------------------------------- */
-int bind_socket(int sockfd, const char *ip, int port)
+int bind_socket(int sockfd, const char* ip, int port)
 {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
 
     addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
 
-    if (!ip || strlen(ip)==0 || strcmp(ip, "0.0.0.0")==0)
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (strcmp(ip, "0.0.0.0") == 0)
+        addr.sin_addr.s_addr = INADDR_ANY;   // écoute sur toutes interfaces
     else
         inet_pton(AF_INET, ip, &addr.sin_addr);
-
-    addr.sin_port = htons(port);
 
     if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         perror("bind");
         return -1;
     }
 
-    printf("[SOCKET] Bind sur %s:%d\n",
-           (ip ? ip : "0.0.0.0"), port);
-
+    printf("[SOCKET] Bind OK sur %s:%d\n", ip, port);
     return 0;
 }
 
@@ -108,3 +107,34 @@ int trouver_groupe(Groupe *groupes, int nb, const char *nom)
             return i;
     return -1;
 }
+
+
+/* ============================================================
+ * Génère un avatar Unicode basé sur l'adresse IP
+ * (Utilise la plage U+2600 → U+26FF : symboles divers)
+ * ============================================================ */
+const char* get_avatar_from_ip(const char* ip)
+{
+    static char buffer[8];
+
+    setlocale(LC_CTYPE, "");
+
+    unsigned long hash = 0;
+    for (int i = 0; ip[i]; i++)
+        hash = hash * 31 + (unsigned char)ip[i];
+
+    unsigned long codepoint = 0x2600 + (hash % 256);
+
+    snprintf(buffer, sizeof(buffer), "%lc", (wint_t)codepoint);
+    return buffer;
+}
+
+/* ============================================================
+ * Notification sonore (simple beep terminal)
+ * ============================================================ */
+void jouer_son_notification(void)
+{
+    printf("\a");     /* beep terminal */
+    fflush(stdout);
+}
+

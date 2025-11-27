@@ -1,9 +1,11 @@
-#include "../include/Commun.h"
+
 #include <signal.h>
 #include <sys/wait.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <string.h>
+
+#include "../include/Commun.h"
 
 /* ============================================================
    VARIABLES GLOBALES
@@ -120,7 +122,7 @@ int creer_groupe(const char* nom, const char* moderateur)
 
 void envoyer_liste_groupes(const char* ip, int port)
 {
-    struct struct_message msg;
+    struct_message msg;
     char liste[TAILLE_TEXTE] = "";
     int count = 0;
 
@@ -148,7 +150,7 @@ void envoyer_liste_groupes(const char* ip, int port)
 void traiter_connexion_groupe(const char* nom, const char* login,
                               const char* ip_client, int port_client)
 {
-    struct struct_message msg;
+    struct_message msg;
     int idx = trouver_groupe(groupes, nb_groupes, nom);
 
     if (idx < 0) {
@@ -195,7 +197,7 @@ void fusionner_groupes(const char* data, const char* demandeur)
 
 void boucle_serveur()
 {
-    struct struct_message msg;
+    struct_message msg;
     char ip_src[TAILLE_IP];
     int port_src;
 
@@ -207,7 +209,7 @@ void boucle_serveur()
             continue;
 
         if (!strcmp(msg.Ordre, ORDRE_CRE)) {
-            struct struct_message rep;
+            struct_message rep;
 
             if (creer_groupe(msg.Texte, msg.Emetteur) >= 0)
                 construire_message(&rep, ORDRE_OK, "Serveur", "Groupe créé");
