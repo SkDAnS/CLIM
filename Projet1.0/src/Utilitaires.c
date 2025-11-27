@@ -39,22 +39,32 @@ int creer_socket_udp() {
     return sockfd;
 }
 
-/* Bind un socket à un port - MODIFIÉ pour écouter sur 0.0.0.0 */
-int bind_socket(int sockfd, int port) {
+int bind_socket(int sockfd, const char *ip, int port)
+{
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
+
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0 - Écoute sur TOUTES les interfaces
+
+    /* Si ip == NULL ou chaîne vide → écouter sur toutes interfaces */
+    if (ip == NULL || strlen(ip) == 0 || strcmp(ip, "0.0.0.0") == 0)
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    else
+        inet_pton(AF_INET, ip, &addr.sin_addr);
+
     addr.sin_port = htons(port);
-    
-    if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+
+    if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("bind");
         return -1;
     }
-    
-    printf("[SOCKET] Bind réussi sur 0.0.0.0:%d (toutes interfaces)\n", port);
+
+    printf("[SOCKET] Bind réussi sur %s:%d\n",
+           (ip ? ip : "0.0.0.0"), port);
+
     return 0;
 }
+
 
 /* Envoyer un message */
 int envoyer_message(int sockfd, struct struct_message* msg, const char* ip_dest, int port_dest) {

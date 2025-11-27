@@ -118,18 +118,14 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     
-    // IMPORTANT : Bind sur 0.0.0.0 pour écouter sur TOUTES les interfaces
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0
-    addr.sin_port = htons(port_groupe);
-    
-    if (bind(sockfd_groupe, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("[GROUPE] Erreur bind");
+    /* Bind via la fonction centralisée (0.0.0.0 = toutes interfaces) */
+    if (bind_socket(sockfd_groupe, "0.0.0.0", port_groupe) < 0) {
+        fprintf(stderr, "[GROUPE %s] Erreur bind sur 0.0.0.0:%d\n",
+                nom_groupe, port_groupe);
         close(sockfd_groupe);
         return EXIT_FAILURE;
     }
+
     
     signal(SIGTERM, gestionnaire_signal);
     signal(SIGINT, gestionnaire_signal);

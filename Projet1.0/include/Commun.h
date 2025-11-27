@@ -96,7 +96,7 @@ typedef struct {
 /* PROTOTYPES */
 char get_avatar_from_ip(const char* ip);
 int creer_socket_udp();
-int bind_socket(int sockfd, int port);
+int bind_socket(int sockfd, const char* ip, int port);
 int envoyer_message(int sockfd, struct struct_message* msg, const char* ip_dest, int port_dest);
 int recevoir_message(int sockfd, struct struct_message* msg, char* ip_src, int* port_src);
 void construire_message(struct struct_message* msg, const char* ordre, const char* emetteur, const char* texte);
