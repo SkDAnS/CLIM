@@ -1,8 +1,3 @@
-/*
- * Commun.h
- * Fichier d'en-tête commun pour le projet ISY Messagerie
- */
-
 #ifndef COMMUN_H
 #define COMMUN_H
 
@@ -73,8 +68,10 @@ typedef struct {
     pid_t pid_processus;
     int nb_membres;
     int actif;
+    char ip[TAILLE_IP];  // Ajoutez un champ pour l'IP
     Membre membres[MAX_MEMBRES_PAR_GROUPE];
 } Groupe;
+
 
 typedef struct {
     int actif;
@@ -103,8 +100,5 @@ void construire_message(struct struct_message* msg, const char* ordre, const cha
 void nettoyer_chaine(char* chaine);
 void jouer_son_notification();
 int trouver_groupe(Groupe groupes[], int nb_groupes, const char* nom);
-void get_local_ip(char* buffer, size_t size);
-
-
 
 #endif
