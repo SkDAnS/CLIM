@@ -1,0 +1,17 @@
+@startuml
+actor Utilisateur
+
+usecase "Quitter un groupe" as UC_Quit
+usecase "Se loguer" as UC_Log
+usecase "Sélectionner groupe" as UC_Sel
+usecase "Fermer session" as UC_Close
+usecase "Mettre à jour liste membres" as UC_Update
+
+Utilisateur --> UC_Quit
+
+UC_Quit ..> UC_Log : <<extend>>
+UC_Quit ..> UC_Sel : <<include>>
+UC_Quit ..> UC_Close : <<include>>
+UC_Quit ..> UC_Update : <<extend>>
+
+@enduml

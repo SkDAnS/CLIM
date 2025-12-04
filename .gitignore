@@ -1,0 +1,8 @@
+# Ignorer tous les exécutables
+Projet1.0/bin/
+
+# Ignorer tous les fichiers objets
+Projet1.0/obj/
+
+# Ignorer le fichier contenant les utilisateurs
+Projet1.0/utilisateurs_connus.txt

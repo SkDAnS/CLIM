@@ -1,0 +1,15 @@
+@startuml
+actor Utilisateur
+
+usecase "Lister les membres d'un groupe" as UC_ListM
+usecase "Rejoindre un groupe" as UC_Join
+usecase "Demander liste des membres" as UC_Dem
+usecase "Afficher liste des membres" as UC_Aff
+
+Utilisateur --> UC_ListM
+
+UC_ListM ..> UC_Join : <<extend>>\n"si liste réservée aux membres"
+UC_ListM ..> UC_Dem : <<include>>
+UC_ListM ..> UC_Aff : <<include>>
+
+@enduml

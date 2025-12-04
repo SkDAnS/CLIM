@@ -1,0 +1,15 @@
+@startuml
+actor Utilisateur
+
+usecase "Lister les groupes" as UC_ListG
+usecase "Se loguer" as UC_Log
+usecase "Demander liste" as UC_Dem
+usecase "Afficher liste" as UC_Aff
+
+Utilisateur --> UC_ListG
+
+UC_ListG ..> UC_Log : <<extend>>\n"si liste réservée"
+UC_ListG ..> UC_Dem : <<include>>
+UC_ListG ..> UC_Aff : <<include>>
+
+@enduml

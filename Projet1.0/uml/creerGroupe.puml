@@ -1,0 +1,18 @@
+@startuml
+actor Utilisateur
+
+usecase "Créer groupe" as UC_Creer
+usecase "Se loguer" as UC_Log
+usecase "Renseigner Groupe" as UC_Rens
+usecase "Vérifier Groupe" as UC_Verif
+usecase "Initialiser Groupe" as UC_Init
+
+Utilisateur --> UC_Creer
+
+UC_Creer ..> UC_Rens : <<include>>
+UC_Creer ..> UC_Verif : <<include>>
+
+UC_Creer ..> UC_Log : <<extend>>\n"si pas encore logué"
+UC_Creer ..> UC_Init : <<extend>>\n"si vérification OK"
+
+@enduml

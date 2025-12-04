@@ -1,0 +1,21 @@
+@startuml
+actor Gestionnaire
+
+usecase "Fusionner deux groupes" as UC_Fus
+usecase "Se loguer" as UC_Log
+usecase "Sélectionner groupe source" as UC_Src
+usecase "Sélectionner groupe cible" as UC_Dst
+usecase "Vérifier compatibilité" as UC_Compat
+usecase "Transférer membres & messages" as UC_Trans
+usecase "Supprimer groupe source" as UC_SupprSrc
+
+Gestionnaire --> UC_Fus
+
+UC_Fus ..> UC_Log : <<extend>>
+UC_Fus ..> UC_Src : <<include>>
+UC_Fus ..> UC_Dst : <<include>>
+UC_Fus ..> UC_Compat : <<include>>
+UC_Fus ..> UC_Trans : <<extend>>\n"si compatible"
+UC_Fus ..> UC_SupprSrc : <<extend>>\n"si fusion validée"
+
+@enduml
