@@ -298,6 +298,7 @@ int main(void)
 
         if (choice == 0) {
             running = 0;
+            exit(0);
         }
         else if (choice == 1) {
             char group_name[MAX_GROUP_NAME];
@@ -394,3 +395,4 @@ int main(void)
 
     return 0;
 }
+
