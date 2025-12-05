@@ -1,4 +1,5 @@
 #include "../include/Commun.h"
+#include "../include/notif.h"
 #include <sys/shm.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -16,6 +17,7 @@ static int sock_cli = -1;              /* socket UDP principal */
 static int shm_id   = -1;
 static ClientDisplayShm *shm_cli = NULL;
 static pid_t pid_affichage = -1;
+static char selected_sound[256] = "notif.wav";  /* son par défaut */
 
 /* =======================================================================
  *  Chargement de la configuration client
@@ -77,6 +79,7 @@ static void init_shm_client(void)
     shm_cli->running = 1;
     shm_cli->notify_flag = 0;
     shm_cli->notify[0] = '\0';
+    snprintf(shm_cli->sound_name, sizeof(shm_cli->sound_name), "%s", selected_sound);
 }
 
 static void detach_shm_client(void)
@@ -287,6 +290,7 @@ int main(void)
         printf("2) Créer un groupe\n");
         printf("3) Liste des groupes\n");
         printf("4) Fusionner deux groupes\n");
+        printf("5) Choisir le son de notification\n");
         printf("0) Quitter\n");
         printf("Choix : ");
 
@@ -298,6 +302,7 @@ int main(void)
 
         if (choice == 0) {
             running = 0;
+            exit(0);
         }
         else if (choice == 1) {
             char group_name[MAX_GROUP_NAME];
@@ -381,6 +386,35 @@ int main(void)
             char reply[256];
             send_command_to_server(cmd, reply, sizeof(reply), NULL, NULL);
             printf("Réponse serveur : %s\n", reply);
+        }
+        else if (choice == 5) {
+            /* Menu pour choisir le son de notification */
+            char nomsSons[MAX_SONS][MAX_NOM];
+            int nbSons = listerSons(nomsSons);
+            
+            if (nbSons == 0) {
+                printf("Aucun fichier .wav trouvé dans le dossier 'sons'.\n");
+            } else {
+                printf("\n=== SONS DISPONIBLES ===\n");
+                for (int i = 0; i < nbSons; i++) {
+                    printf("%d) %s\n", i + 1, nomsSons[i]);
+                }
+                printf("Choix du son (1-%d) : ", nbSons);
+                
+                if (fgets(buffer, sizeof(buffer), stdin)) {
+                    int choice_son = atoi(buffer);
+                    if (choice_son >= 1 && choice_son <= nbSons) {
+                        snprintf(selected_sound, sizeof(selected_sound), "%s", nomsSons[choice_son - 1]);
+                        /* Mettre à jour le SHM pour que AffichageISY utilise ce son */
+                        if (shm_cli) {
+                            snprintf(shm_cli->sound_name, sizeof(shm_cli->sound_name), "%s", selected_sound);
+                        }
+                        printf("Son sélectionné : %s\n", selected_sound);
+                    } else {
+                        printf("Choix invalide.\n");
+                    }
+                }
+            }
         }
         else {
             printf("Choix invalide.\n");

@@ -62,11 +62,12 @@ typedef struct {
 } GroupeInfo;
 
 /* SHM ClientISY <-> AffichageISY
- * Minimal : seulement un flag pour demander l’arrêt de l’affichage. */
+ * Minimal : seulement un flag pour demander l'arrêt de l'affichage. */
 typedef struct {
     int running;                   /* 1 = continuer, 0 = arrêter */
     char notify[MAX_TEXT];         /* message pour inviter a migrer */
     int  notify_flag;              /* 1 = nouvelle notification */
+    char sound_name[256];          /* nom du fichier son pour notifications */
 } ClientDisplayShm;
 
 /* SHM ServeurISY <-> GroupeISY (ex : statistiques) – optionnel */

@@ -7,7 +7,7 @@ OBJDIR	= obj
 BINDIR	= bin
 
 SOURCES	= $(SRCDIR)/ServeurISY.c $(SRCDIR)/GroupeISY.c \
-          $(SRCDIR)/ClientISY.c $(SRCDIR)/AffichageISY.c
+          $(SRCDIR)/ClientISY.c $(SRCDIR)/AffichageISY.c $(SRCDIR)/notif.c
 OBJECTS	= $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
 TARGETS	= $(BINDIR)/ServeurISY $(BINDIR)/GroupeISY \
@@ -32,10 +32,10 @@ $(BINDIR)/ServeurISY: $(OBJDIR)/ServeurISY.o
 $(BINDIR)/GroupeISY: $(OBJDIR)/GroupeISY.o
 	$(CC) $^ -o $@
 
-$(BINDIR)/ClientISY: $(OBJDIR)/ClientISY.o
+$(BINDIR)/ClientISY: $(OBJDIR)/ClientISY.o $(OBJDIR)/notif.o
 	$(CC) $^ -o $@
 
-$(BINDIR)/AffichageISY: $(OBJDIR)/AffichageISY.o
+$(BINDIR)/AffichageISY: $(OBJDIR)/AffichageISY.o $(OBJDIR)/notif.o
 	$(CC) $^ -o $@
 
 clean:
