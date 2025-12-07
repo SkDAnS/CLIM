@@ -244,6 +244,15 @@ static void send_message_to_group(const char *group_name,
  * ======================================================================= */
 int main(void)
 {
+    char nomsSons[MAX_SONS][MAX_NOM];
+    listerSons(nomsSons);
+    // Mettre le son 1 par défaut
+    snprintf(selected_sound, sizeof(selected_sound), "%s", nomsSons[0]);
+    /* Mettre à jour le SHM pour que AffichageISY utilise ce son */
+    if (shm_cli) {
+        snprintf(shm_cli->sound_name, sizeof(shm_cli->sound_name), "%s", selected_sound);
+    }
+
     load_config("config/client_template.conf");
 
     /* No broadcast discovery in this project; server_ip must be in config */
