@@ -4,6 +4,7 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 
 typedef struct {
@@ -108,12 +109,22 @@ static pid_t start_affichage(void)
         perror("execl AffichageISY");
         _exit(EXIT_FAILURE);*/
 
+        // récupérer l'emplacement du dossier de projet
+        char project_path[512];
+        if (getcwd(project_path, sizeof(project_path)) == NULL) {
+            perror("getcwd");
+            exit(1);
+        }
+
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
 
-        execlp("gnome-terminal", "gnome-terminal", "--", "./bin/AffichageISY", port_str, cfg.username, (char *)NULL);
+        char cmd[1024];
+        snprintf(cmd, sizeof(cmd), "cd '%s' && ./bin/AffichageISY %s %s", project_path, port_str, cfg.username);
 
-        perror("execl gnome-terminal + lancement AffichageISY");   // seulement si execlp échoue
+        execlp("gnome-terminal", "gnome-terminal", "--", "bash", "-c", cmd, (char *)NULL);
+
+        perror("execl gnome-terminal + lancement AffichageISY");
         _exit(EXIT_FAILURE);
     }
 
