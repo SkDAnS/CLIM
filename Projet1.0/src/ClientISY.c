@@ -101,12 +101,19 @@ static pid_t start_affichage(void)
 
     if (pid == 0) {
         /* Fils → exécuter AffichageISY */
+        /*char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
+
+        execl("./bin/AffichageISY", "./bin/AffichageISY", port_str, cfg.username, (char *)NULL);
+        perror("execl AffichageISY");
+        _exit(EXIT_FAILURE);*/
+
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
 
-        execl("./bin/AffichageISY", "./bin/AffichageISY",
-              port_str, cfg.username, (char *)NULL);
-        perror("execl AffichageISY");
+        execlp("gnome-terminal", "gnome-terminal", "--", "./bin/AffichageISY", port_str, cfg.username, (char *)NULL);
+
+        perror("execl gnome-terminal + lancement AffichageISY");   // seulement si execlp échoue
         _exit(EXIT_FAILURE);
     }
 
