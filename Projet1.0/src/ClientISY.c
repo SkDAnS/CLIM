@@ -4,6 +4,9 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <unistd.h>
+
+
 
 
 typedef struct {
@@ -90,6 +93,68 @@ static void detach_shm_client(void)
     }
 }
 
+/* Cherche un exécutable dans le PATH et renvoie 1 si trouvé. */
+static int find_executable_in_path(const char *name)
+{
+    char *path = getenv("PATH");
+    if (!path) return 0;
+    char buf[2048];
+    strncpy(buf, path, sizeof(buf));
+    buf[sizeof(buf)-1] = '\0';
+    char *dir = strtok(buf, ":");
+    while (dir) {
+        char cand[1024];
+        snprintf(cand, sizeof(cand), "%s/%s", dir, name);
+        if (access(cand, X_OK) == 0)
+            return 1;
+        dir = strtok(NULL, ":");
+    }
+    /* Fallback: maybe name is an absolute path */
+    if (access(name, X_OK) == 0) return 1;
+    return 0;
+}
+
+/* Détecte un terminal graphique dispo et renvoie son nom (string statique) */
+static const char *detect_terminal(void)
+{
+    static const char *candidates[] = {
+        "gnome-terminal",
+        "konsole",
+        "xfce4-terminal",
+        "mate-terminal",
+        "terminator",
+        "alacritty",
+        "xterm",
+        "urxvt",
+        NULL
+    };
+    for (int i = 0; candidates[i]; ++i) {
+        if (find_executable_in_path(candidates[i]))
+            return candidates[i];
+    }
+    return NULL;
+}
+
+/* Retourne 1 si le programme tourne sous WSL */
+static int is_wsl(void)
+{
+    char buf[256];
+    FILE *f = fopen("/proc/version", "r");
+    if (!f) {
+        /* aussi vérifier variable d'environnement */
+        char *w = getenv("WSL_DISTRO_NAME");
+        return (w != NULL);
+    }
+    if (!fgets(buf, sizeof(buf), f)) {
+        fclose(f);
+        return 0;
+    }
+    fclose(f);
+    if (strcasestr(buf, "microsoft") != NULL || strcasestr(buf, "wsl") != NULL)
+        return 1;
+    return 0;
+}
+
 /* Lance AffichageISY dans un processus fils */
 static pid_t start_affichage(void)
 {
@@ -101,14 +166,76 @@ static pid_t start_affichage(void)
 
     if (pid == 0) {
         /* Fils → exécuter AffichageISY */
+        /*char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
+
+        execl("./bin/AffichageISY", "./bin/AffichageISY", port_str, cfg.username, (char *)NULL);
+        perror("execl AffichageISY");
+        _exit(EXIT_FAILURE);*/
+
+        // récupérer l'emplacement du dossier de projet
+
+        printf("entrer avant la recherche du dossier courant\n");
+        
+        char project_path[512];
+        if (getcwd(project_path, sizeof(project_path)) == NULL) {
+            perror("getcwd");
+            exit(1);
+        }
+        printf("Voici le directory du projet : %s", project_path);
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
 
-        execl("./bin/AffichageISY", "./bin/AffichageISY",
-              port_str, cfg.username, (char *)NULL);
-        perror("execl AffichageISY");
+        /* Construire la commande simple qui lance AffichageISY dans le répertoire projet */
+        char cmd[1024];
+        snprintf(cmd, sizeof(cmd), "cd '%s' && exec ./bin/AffichageISY %s %s", project_path, port_str, cfg.username);
+
+        /* Détecter un terminal disponible et l'utiliser pour ouvrir une nouvelle fenêtre */
+        const char *term = detect_terminal();
+        if (!term && !is_wsl()) {
+            fprintf(stderr, "Aucun terminal trouvé dans PATH; impossible d'ouvrir une nouvelle fenêtre.\n");
+            _exit(EXIT_FAILURE);
+        }
+
+        /* Debug: afficher le terminal/lanceur choisi */
+        if (is_wsl()) {
+            const char *launcher = NULL;
+            if (find_executable_in_path("wt.exe")) launcher = "wt.exe";
+            else if (find_executable_in_path("powershell.exe")) launcher = "powershell.exe";
+            else if (find_executable_in_path("cmd.exe")) launcher = "cmd.exe";
+            printf("[DEBUG] WSL détecté, lanceur choisi: %s\n", launcher ? launcher : "aucun");
+
+            /* Under WSL prefer Windows Terminal, then PowerShell, then cmd */
+            if (find_executable_in_path("wt.exe")) {
+                execlp("wt.exe", "wt.exe", "wsl", "-e", "bash", "-c", cmd, (char *)NULL);
+            } else if (find_executable_in_path("powershell.exe")) {
+                char wrapper[1280];
+                snprintf(wrapper, sizeof(wrapper), "wsl bash -lc '%s'", cmd);
+                execlp("powershell.exe", "powershell.exe", "-NoExit", "-Command", wrapper, (char *)NULL);
+            } else if (find_executable_in_path("cmd.exe")) {
+                execlp("cmd.exe", "cmd.exe", "/C", "start", "", "wsl", "bash", "-lc", cmd, (char *)NULL);
+            } else {
+                fprintf(stderr, "WSL détecté mais aucun lanceur Windows trouvé.\n");
+                _exit(EXIT_FAILURE);
+            }
+        } else {
+            printf("[DEBUG] Terminal détecté: %s\n", term ? term : "aucun");
+            if (strcmp(term, "gnome-terminal") == 0) {
+                execlp("gnome-terminal", "gnome-terminal", "--", "bash", "-c", cmd, (char *)NULL);
+            } else {
+                /* La plupart des terminaux acceptent -e pour exécuter une commande dans une nouvelle fenêtre */
+                execlp(term, term, "-e", "bash", "-c", cmd, (char *)NULL);
+            }
+        }
+
+    
+        perror("execl gnome-terminal + lancement AffichageISY");
         _exit(EXIT_FAILURE);
     }
+
+    /* Parent: pid contient le PID du processus forké (terminal enfant).
+       On conserve le PID du child dans `pid_affichage` et on s'appuiera
+       sur waitpid() / kill() pour fermer la fenêtre si nécessaire. */
 
     return pid;
 }
@@ -124,6 +251,7 @@ static void stop_affichage(void)
         waitpid(pid_affichage, &status, 0);
         pid_affichage = -1;
     }
+    /* No pidfile to clean up in this simplified mode */
 }
 
 /* =======================================================================
@@ -244,6 +372,15 @@ static void send_message_to_group(const char *group_name,
  * ======================================================================= */
 int main(void)
 {
+    char nomsSons[MAX_SONS][MAX_NOM];
+    listerSons(nomsSons);
+    // Mettre le son 1 par défaut
+    snprintf(selected_sound, sizeof(selected_sound), "%s", nomsSons[0]);
+    /* Mettre à jour le SHM pour que AffichageISY utilise ce son */
+    if (shm_cli) {
+        snprintf(shm_cli->sound_name, sizeof(shm_cli->sound_name), "%s", selected_sound);
+    }
+
     load_config("config/client_template.conf");
 
     /* No broadcast discovery in this project; server_ip must be in config */
@@ -335,9 +472,14 @@ int main(void)
                         break;
                     buffer[strcspn(buffer, "\n")] = '\0';
 
-                    if (strcmp(buffer, "quit") == 0)
+                    if (strcmp(buffer, "quit") == 0){
+                        /* Terminate the terminal child; that will close the window */
+                        if (pid_affichage > 0) {
+                            kill(pid_affichage, SIGTERM);
+                            pid_affichage = -1;
+                        }
                         break;
-
+                    }
                     send_message_to_group(group_name, port_groupe, buffer);
                 }
             }
