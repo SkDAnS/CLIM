@@ -6,7 +6,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <signal.h>
 
 #include <sys/types.h>
 #if defined(__unix__) || defined(__APPLE__)
@@ -18,6 +17,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 /* Paramètres généraux */
 

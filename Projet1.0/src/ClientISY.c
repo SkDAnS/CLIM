@@ -7,6 +7,8 @@
 #include <unistd.h>
 
 
+
+
 typedef struct {
     char username[MAX_USERNAME];
     char server_ip[64];
@@ -110,20 +112,25 @@ static pid_t start_affichage(void)
         _exit(EXIT_FAILURE);*/
 
         // récupérer l'emplacement du dossier de projet
+
+        printf("entrer avant la recherche du dossier courant\n");
+        
         char project_path[512];
         if (getcwd(project_path, sizeof(project_path)) == NULL) {
             perror("getcwd");
             exit(1);
         }
-
+        printf("Voici le directory du projet : %s", project_path);
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
 
         char cmd[1024];
         snprintf(cmd, sizeof(cmd), "cd '%s' && ./bin/AffichageISY %s %s", project_path, port_str, cfg.username);
 
+
         execlp("gnome-terminal", "gnome-terminal", "--", "bash", "-c", cmd, (char *)NULL);
 
+    
         perror("execl gnome-terminal + lancement AffichageISY");
         _exit(EXIT_FAILURE);
     }
@@ -362,9 +369,11 @@ int main(void)
                         break;
                     buffer[strcspn(buffer, "\n")] = '\0';
 
-                    if (strcmp(buffer, "quit") == 0)
+                    if (strcmp(buffer, "quit") == 0){
+                        kill(pid_affichage, SIGTERM);
+                        pid_affichage = -1;
                         break;
-
+                    }
                     send_message_to_group(group_name, port_groupe, buffer);
                 }
             }
