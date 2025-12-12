@@ -135,25 +135,7 @@ static const char *detect_terminal(void)
     return NULL;
 }
 
-/* Retourne 1 si le programme tourne sous WSL */
-static int is_wsl(void)
-{
-    char buf[256];
-    FILE *f = fopen("/proc/version", "r");
-    if (!f) {
-        /* aussi vérifier variable d'environnement */
-        char *w = getenv("WSL_DISTRO_NAME");
-        return (w != NULL);
-    }
-    if (!fgets(buf, sizeof(buf), f)) {
-        fclose(f);
-        return 0;
-    }
-    fclose(f);
-    if (strcasestr(buf, "microsoft") != NULL || strcasestr(buf, "wsl") != NULL)
-        return 1;
-    return 0;
-}
+/* (WSL detection removed) */
 
 /* Lance AffichageISY dans un processus fils */
 static pid_t start_affichage(void)
@@ -192,40 +174,18 @@ static pid_t start_affichage(void)
 
         /* Détecter un terminal disponible et l'utiliser pour ouvrir une nouvelle fenêtre */
         const char *term = detect_terminal();
-        if (!term && !is_wsl()) {
+        if (!term) {
             fprintf(stderr, "Aucun terminal trouvé dans PATH; impossible d'ouvrir une nouvelle fenêtre.\n");
             _exit(EXIT_FAILURE);
         }
 
-        /* Debug: afficher le terminal/lanceur choisi */
-        if (is_wsl()) {
-            const char *launcher = NULL;
-            if (find_executable_in_path("wt.exe")) launcher = "wt.exe";
-            else if (find_executable_in_path("powershell.exe")) launcher = "powershell.exe";
-            else if (find_executable_in_path("cmd.exe")) launcher = "cmd.exe";
-            printf("[DEBUG] WSL détecté, lanceur choisi: %s\n", launcher ? launcher : "aucun");
-
-            /* Under WSL prefer Windows Terminal, then PowerShell, then cmd */
-            if (find_executable_in_path("wt.exe")) {
-                execlp("wt.exe", "wt.exe", "wsl", "-e", "bash", "-c", cmd, (char *)NULL);
-            } else if (find_executable_in_path("powershell.exe")) {
-                char wrapper[1280];
-                snprintf(wrapper, sizeof(wrapper), "wsl bash -lc '%s'", cmd);
-                execlp("powershell.exe", "powershell.exe", "-NoExit", "-Command", wrapper, (char *)NULL);
-            } else if (find_executable_in_path("cmd.exe")) {
-                execlp("cmd.exe", "cmd.exe", "/C", "start", "", "wsl", "bash", "-lc", cmd, (char *)NULL);
-            } else {
-                fprintf(stderr, "WSL détecté mais aucun lanceur Windows trouvé.\n");
-                _exit(EXIT_FAILURE);
-            }
+        /* Debug: afficher le terminal choisi */
+        printf("[DEBUG] Terminal détecté: %s\n", term ? term : "aucun");
+        if (strcmp(term, "gnome-terminal") == 0) {
+            execlp("gnome-terminal", "gnome-terminal", "--", "bash", "-c", cmd, (char *)NULL);
         } else {
-            printf("[DEBUG] Terminal détecté: %s\n", term ? term : "aucun");
-            if (strcmp(term, "gnome-terminal") == 0) {
-                execlp("gnome-terminal", "gnome-terminal", "--", "bash", "-c", cmd, (char *)NULL);
-            } else {
-                /* La plupart des terminaux acceptent -e pour exécuter une commande dans une nouvelle fenêtre */
-                execlp(term, term, "-e", "bash", "-c", cmd, (char *)NULL);
-            }
+            /* La plupart des terminaux acceptent -e pour exécuter une commande dans une nouvelle fenêtre */
+            execlp(term, term, "-e", "bash", "-c", cmd, (char *)NULL);
         }
 
     
