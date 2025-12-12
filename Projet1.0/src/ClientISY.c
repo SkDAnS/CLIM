@@ -3,6 +3,7 @@
 #include <sys/shm.h>
 #include <sys/time.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -172,6 +173,13 @@ static pid_t start_affichage(void)
         char cmd[1024];
         snprintf(cmd, sizeof(cmd), "cd '%s' && exec ./bin/AffichageISY %s %s", project_path, port_str, cfg.username);
 
+        /* Make the child the leader of a new session so we can signal the whole
+           process group (the terminal and its children) from the parent. */
+        if (setsid() < 0) {
+            perror("setsid");
+            /* continue anyway */
+        }
+
         /* Détecter un terminal disponible et l'utiliser pour ouvrir une nouvelle fenêtre */
         const char *term = detect_terminal();
         if (!term) {
@@ -207,8 +215,27 @@ static void stop_affichage(void)
         shm_cli->running = 0;
     }
     if (pid_affichage > 0) {
-        int status;
-        waitpid(pid_affichage, &status, 0);
+        pid_t g = -pid_affichage;
+        if (kill(g, SIGTERM) < 0) {
+            perror("stop_affichage: kill(SIGTERM)");
+        } else {
+            /* wait up to ~1s for child to exit */
+            int waited = 0;
+            while (waited < 100) {
+                int status;
+                pid_t r = waitpid(pid_affichage, &status, WNOHANG);
+                if (r == pid_affichage) break;
+                usleep(10000); /* 10ms */
+                waited += 1;
+            }
+        }
+        /* if still alive, force kill */
+        if (kill(g, 0) == 0) {
+            if (kill(g, SIGKILL) < 0)
+                perror("stop_affichage: kill(SIGKILL)");
+        }
+        /* reap child */
+        waitpid(pid_affichage, NULL, 0);
         pid_affichage = -1;
     }
     /* No pidfile to clean up in this simplified mode */
@@ -433,9 +460,29 @@ int main(void)
                     buffer[strcspn(buffer, "\n")] = '\0';
 
                     if (strcmp(buffer, "quit") == 0){
-                        /* Terminate the terminal child; that will close the window */
+                        /* Terminate the terminal child; try graceful then force */
                         if (pid_affichage > 0) {
-                            kill(pid_affichage, SIGTERM);
+                            pid_t g = -pid_affichage;
+                            if (kill(g, SIGTERM) < 0) {
+                                perror("kill(SIGTERM) failed");
+                            } else {
+                                /* give it a short moment to exit */
+                                int waited = 0;
+                                while (waited < 100) {
+                                    int status;
+                                    pid_t r = waitpid(pid_affichage, &status, WNOHANG);
+                                    if (r == pid_affichage) break;
+                                    usleep(10000); /* 10ms */
+                                    waited += 1;
+                                }
+                            }
+                            /* if still alive, force kill */
+                            if (kill(g, 0) == 0) {
+                                if (kill(g, SIGKILL) < 0)
+                                    perror("kill(SIGKILL) failed");
+                            }
+                            /* reap child */
+                            waitpid(pid_affichage, NULL, 0);
                             pid_affichage = -1;
                         }
                         break;
