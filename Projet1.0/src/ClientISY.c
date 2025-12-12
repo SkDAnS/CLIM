@@ -3,6 +3,7 @@
 #include "../include/notif.h"
 #include <sys/shm.h>
 #include <sys/time.h>
+#include <time.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <fcntl.h>
@@ -128,6 +129,15 @@ static void safe_strncpy(char *dst, size_t dstsize, const char *src)
     snprintf(dst, dstsize, "%.*s", (int)(dstsize - 1), src ? src : "");
 }
 
+/* Portable millisecond sleep using nanosleep to avoid deprecated usleep warnings */
+static void sleep_ms(unsigned int ms)
+{
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000;
+    (void)nanosleep(&ts, NULL);
+}
+
 /* Détecte un terminal graphique dispo et renvoie son nom (string statique) */
 static const char *detect_terminal(void)
 {
@@ -238,7 +248,7 @@ static void stop_affichage(void)
                 int status;
                 pid_t r = waitpid(pid_affichage, &status, WNOHANG);
                 if (r == pid_affichage) break;
-                usleep(10000); /* 10ms */
+                sleep_ms(10); /* 10ms */
                 waited += 1;
             }
         }
@@ -444,8 +454,9 @@ int main(void)
         int choice = atoi(buffer);
 
         if (choice == 0) {
+            /* Allow the main loop to exit normally so cleanup runs */
             running = 0;
-            exit(0);
+            break;
         }
         else if (choice == 1) {
             char group_name[MAX_GROUP_NAME];
@@ -491,7 +502,7 @@ int main(void)
                                     int status;
                                     pid_t r = waitpid(pid_affichage, &status, WNOHANG);
                                     if (r == pid_affichage) break;
-                                    usleep(10000); /* 10ms */
+                                    sleep_ms(10); /* 10ms */
                                     waited += 1;
                                 }
                             }
