@@ -34,5 +34,10 @@ void jouerSon(const char *nomFichier)
     snprintf(commande, sizeof(commande), "ffplay -nodisp -autoexit \"sons/%s\" 2>/dev/null &", nomFichier);
 #endif
     /* Launch in background (& suffix on Linux) to avoid blocking */
-    system(commande);
+    {
+        int rc = system(commande);
+        if (rc == -1) {
+            perror("system");
+        }
+    }
 }

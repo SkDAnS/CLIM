@@ -154,9 +154,11 @@ int main(int argc, char *argv[])
             ISYMessage notice;
             memset(&notice, 0, sizeof(notice));
             strcpy(notice.ordre, ORDRE_MSG);
-            snprintf(notice.emetteur, MAX_USERNAME, "%s", "SERVER");
+            strncpy(notice.emetteur, "SERVER", MAX_USERNAME - 1);
+            notice.emetteur[MAX_USERNAME - 1] = '\0';
             choose_emoji_from_username("SERVER", notice.emoji);
-            snprintf(notice.groupe, MAX_GROUP_NAME, "%s", nom_groupe);
+            strncpy(notice.groupe, nom_groupe, MAX_GROUP_NAME - 1);
+            notice.groupe[MAX_GROUP_NAME - 1] = '\0';
             /* Parse MIGRATE <newname> <newport> */
             char newname[MAX_GROUP_NAME] = {0};
             int newport = -1;
@@ -166,8 +168,9 @@ int main(int argc, char *argv[])
                 ISYMessage control;
                 memset(&control, 0, sizeof(control));
                 strcpy(control.ordre, ORDRE_MSG);
-                snprintf(control.emetteur, MAX_USERNAME, "%s", "SERVER");
-                snprintf(control.emoji, MAX_EMOJI, "%s", notice.emoji);
+                strncpy(control.emetteur, "SERVER", MAX_USERNAME - 1);
+                control.emetteur[MAX_USERNAME - 1] = '\0';
+                snprintf(control.emoji, MAX_EMOJI, "%.*s", (int)(MAX_EMOJI - 1), notice.emoji);
                 snprintf(control.texte, sizeof(control.texte), "MIGRATE %s %d", newname, newport);
                 broadcast_message(&control);
             }
@@ -182,20 +185,35 @@ int main(int argc, char *argv[])
                     ISYMessage addmsg;
                     memset(&addmsg, 0, sizeof(addmsg));
                     strcpy(addmsg.ordre, ORDRE_MGR);
-                    snprintf(addmsg.emetteur, MAX_USERNAME, "%s", nom_groupe);
-                    snprintf(addmsg.emoji, MAX_EMOJI, "%s", clients[i].emoji);
+                    strncpy(addmsg.emetteur, nom_groupe, MAX_USERNAME - 1);
+                    addmsg.emetteur[MAX_USERNAME - 1] = '\0';
+                    snprintf(addmsg.emoji, MAX_EMOJI, "%.*s", (int)(MAX_EMOJI - 1), clients[i].emoji);
                     snprintf(addmsg.texte, sizeof(addmsg.texte), "ADDCLIENT %s %s %d", clients[i].nom, ipstr, ntohs(clients[i].addr_cli.sin_port));
                     ssize_t r = sendto(sock_grp, &addmsg, sizeof(addmsg), 0, (struct sockaddr *)&addr_target, sizeof(addr_target));
                     if (r < 0) perror("sendto ADDCLIENT");
                 }
                 /* Also notify local clients */
-                snprintf(notice.texte, sizeof(notice.texte), "Groupe fusionné → %s (port %d)", newname, newport);
+                /* build notice text safely */
+                {
+                    const char prefix[] = "Groupe fusionné → ";
+                    size_t avail = sizeof(notice.texte) - 1;
+                    strncpy(notice.texte, prefix, avail);
+                    notice.texte[avail] = '\0';
+                    size_t used = strlen(notice.texte);
+                    if (used < avail) {
+                        char buf[64];
+                        snprintf(buf, sizeof(buf), "%s (port %d)", newname, newport);
+                        strncat(notice.texte, buf, avail - used);
+                    }
+                }
                 /* also broadcast the control MIGRATE message for clients to auto-join */
                 ISYMessage control;
                 memset(&control, 0, sizeof(control));
                 strcpy(control.ordre, ORDRE_MSG);
-                snprintf(control.emetteur, MAX_USERNAME, "%s", "SERVER");
-                snprintf(control.emoji, MAX_EMOJI, "%s", notice.emoji);
+                strncpy(control.emetteur, "SERVER", MAX_USERNAME - 1);
+                control.emetteur[MAX_USERNAME - 1] = '\0';
+                strncpy(control.emoji, notice.emoji, MAX_EMOJI - 1);
+                control.emoji[MAX_EMOJI - 1] = '\0';
                 snprintf(control.texte, sizeof(control.texte), "MIGRATE %s %d", newname, newport);
                 broadcast_message(&control);
             }
@@ -210,7 +228,18 @@ int main(int argc, char *argv[])
                 /* Do not broadcast add notice to local clients, continue to next message */
                 continue;
             } else {
-                snprintf(notice.texte, sizeof(notice.texte), "Groupe fusionné → %s", msg.texte);
+                /* build notice text safely */
+                {
+                    const char prefix[] = "Groupe fusionné → ";
+                    size_t avail = sizeof(notice.texte) - 1;
+                    strncpy(notice.texte, prefix, avail);
+                    notice.texte[avail] = '\0';
+                    size_t used = strlen(notice.texte);
+                    if (used < avail) {
+                        /* Append at most remaining space using snprintf to avoid warnings */
+                        snprintf(notice.texte + used, avail - used + 1, "%.*s", (int)(avail - used), msg.texte);
+                    }
+                }
             }
             broadcast_message(&notice);
         }

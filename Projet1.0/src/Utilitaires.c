@@ -108,9 +108,12 @@ int recevoir_message(int sockfd, struct struct_message* msg, char* ip_src, int* 
 void construire_message(struct struct_message* msg, const char* ordre,
                        const char* emetteur, const char* texte) {
     memset(msg, 0, sizeof(struct struct_message));
-    snprintf(msg->Ordre, TAILLE_ORDRE, "%s", ordre);
-    snprintf(msg->Emetteur, TAILLE_EMETTEUR, "%s", emetteur);
-    snprintf(msg->Texte, TAILLE_TEXTE, "%s", texte);
+    strncpy(msg->Ordre, ordre ? ordre : "", TAILLE_ORDRE - 1);
+    msg->Ordre[TAILLE_ORDRE - 1] = '\0';
+    strncpy(msg->Emetteur, emetteur ? emetteur : "", TAILLE_EMETTEUR - 1);
+    msg->Emetteur[TAILLE_EMETTEUR - 1] = '\0';
+    strncpy(msg->Texte, texte ? texte : "", TAILLE_TEXTE - 1);
+    msg->Texte[TAILLE_TEXTE - 1] = '\0';
 }
 
 /* Nettoyer une chaîne (retirer \n) */

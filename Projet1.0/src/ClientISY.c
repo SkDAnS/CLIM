@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "../include/Commun.h"
 #include "../include/notif.h"
 #include <sys/shm.h>
@@ -36,9 +37,12 @@ static void load_config(const char *path)
         char key[64], val[128];
         if (sscanf(line, "%63[^=]=%127s", key, val) == 2) {
             if (strcmp(key, "username") == 0) {
-                snprintf(cfg.username, MAX_USERNAME, "%s", val);
+                /* safe copy */
+                strncpy(cfg.username, val, MAX_USERNAME - 1);
+                cfg.username[MAX_USERNAME - 1] = '\0';
             } else if (strcmp(key, "server_ip") == 0) {
-                snprintf(cfg.server_ip, sizeof(cfg.server_ip), "%s", val);
+                strncpy(cfg.server_ip, val, sizeof(cfg.server_ip) - 1);
+                cfg.server_ip[sizeof(cfg.server_ip) - 1] = '\0';
             } else if (strcmp(key, "display_port") == 0) {
                 cfg.display_port = atoi(val);
             }
@@ -83,7 +87,8 @@ static void init_shm_client(void)
     shm_cli->running = 1;
     shm_cli->notify_flag = 0;
     shm_cli->notify[0] = '\0';
-    snprintf(shm_cli->sound_name, sizeof(shm_cli->sound_name), "%s", selected_sound);
+    strncpy(shm_cli->sound_name, selected_sound, sizeof(shm_cli->sound_name) - 1);
+    shm_cli->sound_name[sizeof(shm_cli->sound_name) - 1] = '\0';
 }
 
 static void detach_shm_client(void)
@@ -113,6 +118,14 @@ static int find_executable_in_path(const char *name)
     /* Fallback: maybe name is an absolute path */
     if (access(name, X_OK) == 0) return 1;
     return 0;
+}
+
+/* Safe copy helper: copy up to dstsize-1 and NUL-terminate. */
+static void safe_strncpy(char *dst, size_t dstsize, const char *src)
+{
+    if (dstsize == 0) return;
+    /* Use snprintf with precision to avoid compiler truncation warnings */
+    snprintf(dst, dstsize, "%.*s", (int)(dstsize - 1), src ? src : "");
 }
 
 /* Détecte un terminal graphique dispo et renvoie son nom (string statique) */
@@ -285,7 +298,7 @@ static void send_command_to_server(const char *cmd,
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             snprintf(reply_buf, reply_sz, "Aucun reponse du serveur (timeout)");
             if (port_groupe_opt) *port_groupe_opt = -1;
-            if (group_name_opt) snprintf(group_name_opt, MAX_GROUP_NAME, "");
+            if (group_name_opt) group_name_opt[0] = '\0';
             return;
         }
         check_fatal(n < 0, "recvfrom serveur");
@@ -305,7 +318,11 @@ static void send_command_to_server(const char *cmd,
     }
 
     if (group_name_opt) {
-        snprintf(group_name_opt, MAX_GROUP_NAME, "%s", reply.groupe);
+        /* set empty if no group name in reply */
+        if (reply.groupe[0] == '\0')
+            group_name_opt[0] = '\0';
+        else
+            safe_strncpy(group_name_opt, MAX_GROUP_NAME, reply.groupe);
     }
 }
 
@@ -321,9 +338,9 @@ static void connect_to_group(const char *group_name, int port_groupe)
     ISYMessage msg;
     memset(&msg, 0, sizeof(msg));
     strcpy(msg.ordre, ORDRE_CON);
-    snprintf(msg.emetteur, MAX_USERNAME, "%s", cfg.username);
+    safe_strncpy(msg.emetteur, MAX_USERNAME, cfg.username);
     choose_emoji_from_username(cfg.username, msg.emoji);
-    snprintf(msg.groupe, MAX_GROUP_NAME, "%s", group_name);
+    safe_strncpy(msg.groupe, MAX_GROUP_NAME, group_name);
     snprintf(msg.texte, sizeof(msg.texte), "%d", cfg.display_port);
 
     ssize_t n = sendto(sock_cli, &msg, sizeof(msg), 0,
@@ -344,10 +361,11 @@ static void send_message_to_group(const char *group_name,
     ISYMessage msg;
     memset(&msg, 0, sizeof(msg));
     strcpy(msg.ordre, ORDRE_MSG);
-    snprintf(msg.emetteur, MAX_USERNAME, "%s", cfg.username);
+    safe_strncpy(msg.emetteur, MAX_USERNAME, cfg.username);
     choose_emoji_from_username(cfg.username, msg.emoji);
-    snprintf(msg.groupe, MAX_GROUP_NAME, "%s", group_name);
-    snprintf(msg.texte, MAX_TEXT, "%s", texte);
+    safe_strncpy(msg.groupe, MAX_GROUP_NAME, group_name);
+    /* copy texte safely with truncation */
+    snprintf(msg.texte, MAX_TEXT, "%.*s", (int)MAX_TEXT - 1, texte ? texte : "");
 
     ssize_t n = sendto(sock_cli, &msg, sizeof(msg), 0,
                        (struct sockaddr *)&addr_grp, sizeof(addr_grp));
@@ -362,10 +380,11 @@ int main(void)
     char nomsSons[MAX_SONS][MAX_NOM];
     listerSons(nomsSons);
     // Mettre le son 1 par défaut
-    snprintf(selected_sound, sizeof(selected_sound), "%s", nomsSons[0]);
+    safe_strncpy(selected_sound, sizeof(selected_sound), nomsSons[0]);
     /* Mettre à jour le SHM pour que AffichageISY utilise ce son */
     if (shm_cli) {
-        snprintf(shm_cli->sound_name, sizeof(shm_cli->sound_name), "%s", selected_sound);
+        strncpy(shm_cli->sound_name, selected_sound, sizeof(shm_cli->sound_name) - 1);
+        shm_cli->sound_name[sizeof(shm_cli->sound_name) - 1] = '\0';
     }
 
     load_config("config/client_template.conf");

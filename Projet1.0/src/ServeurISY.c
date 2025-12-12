@@ -81,7 +81,8 @@ static void handle_command(ISYMessage *msg,
     ISYMessage reply;
     memset(&reply, 0, sizeof(reply));
     strcpy(reply.ordre, ORDRE_RPL);
-    snprintf(reply.emetteur, MAX_USERNAME, "%s", "SERVER");
+    strncpy(reply.emetteur, "SERVER", MAX_USERNAME - 1);
+    reply.emetteur[MAX_USERNAME - 1] = '\0';
     choose_emoji_from_username("SERVER", reply.emoji);
 
     char cmd[16] = {0};
@@ -107,7 +108,8 @@ static void handle_command(ISYMessage *msg,
         if (buffer[0] == '\0')
             strcpy(buffer, "Aucun groupe\n");
 
-        snprintf(reply.texte, MAX_TEXT, "%s", buffer);
+        strncpy(reply.texte, buffer, MAX_TEXT - 1);
+        reply.texte[MAX_TEXT - 1] = '\0';
     }
     else if (strcmp(cmd, "CREATE") == 0) {
         if (arg1[0] == '\0') {
@@ -123,8 +125,8 @@ static void handle_command(ISYMessage *msg,
                 strcpy(reply.texte, "Plus de place pour de nouveaux groupes");
             } else {
                 groupes[slot].actif = 1;
-                snprintf(groupes[slot].nom, MAX_GROUP_NAME, "%s", arg1);
-                snprintf(groupes[slot].moderateur, MAX_USERNAME, "%s", msg->emetteur);
+                snprintf(groupes[slot].nom, MAX_GROUP_NAME, "%.*s", (int)(MAX_GROUP_NAME - 1), arg1);
+                snprintf(groupes[slot].moderateur, MAX_USERNAME, "%.*s", (int)(MAX_USERNAME - 1), msg->emetteur);
                 groupes[slot].port_groupe = GROUP_PORT_BASE + slot;
 
                 /* Optionnel : SHM stats */
@@ -143,7 +145,8 @@ static void handle_command(ISYMessage *msg,
                     pid_t r = waitpid(groupes[slot].pid, &status, WNOHANG);
                     if (r == groupes[slot].pid) {
                         /* Child terminated immediately -> creation failed */
-                        snprintf(reply.texte, MAX_TEXT, "Erreur: echec demarrage GroupeISY");
+                            strncpy(reply.texte, "Erreur: echec demarrage GroupeISY", MAX_TEXT - 1);
+                            reply.texte[MAX_TEXT - 1] = '\0';
                         /* cleanup */
                         groupes[slot].actif = 0;
                         if (groupes[slot].shm_id > 0) { shmctl(groupes[slot].shm_id, IPC_RMID, NULL); groupes[slot].shm_id = 0; }
@@ -169,7 +172,8 @@ static void handle_command(ISYMessage *msg,
         } else {
             snprintf(reply.texte, MAX_TEXT,
                      "OK %d", groupes[idx].port_groupe);
-            snprintf(reply.groupe, MAX_GROUP_NAME, "%s", groupes[idx].nom);
+            strncpy(reply.groupe, groupes[idx].nom, MAX_GROUP_NAME - 1);
+            reply.groupe[MAX_GROUP_NAME - 1] = '\0';
         }
     }
     else if (strcmp(cmd, "MERGE") == 0) {
@@ -226,7 +230,8 @@ static void handle_command(ISYMessage *msg,
                             ISYMessage migr_msg;
                             memset(&migr_msg, 0, sizeof(migr_msg));
                             strcpy(migr_msg.ordre, ORDRE_MGR);
-                            snprintf(migr_msg.emetteur, MAX_USERNAME, "%s", "SERVER");
+                            strncpy(migr_msg.emetteur, "SERVER", MAX_USERNAME - 1);
+                            migr_msg.emetteur[MAX_USERNAME - 1] = '\0';
                             strcpy(migr_msg.emoji, reply.emoji);
                             snprintf(migr_msg.texte, sizeof(migr_msg.texte), "MIGRATEEXIST %s %d", groupes[target_idx].nom, target_port);
 
@@ -246,7 +251,8 @@ static void handle_command(ISYMessage *msg,
                             ISYMessage notify;
                             memset(&notify, 0, sizeof(notify));
                             strcpy(notify.ordre, ORDRE_MGR);
-                            snprintf(notify.emetteur, MAX_USERNAME, "%s", "SERVER");
+                            strncpy(notify.emetteur, "SERVER", MAX_USERNAME - 1);
+                            notify.emetteur[MAX_USERNAME - 1] = '\0';
                             strcpy(notify.emoji, reply.emoji);
                             snprintf(notify.texte, sizeof(notify.texte), "MIGRATE %s %d", groupes[target_idx].nom, target_port);
                             if (idx1 != target_idx) sendto(sock_srv, &notify, sizeof(notify), 0, (struct sockaddr*)&addrOld1, sizeof(addrOld1));
@@ -276,15 +282,16 @@ static void handle_command(ISYMessage *msg,
                                 groupes[idx2].actif = 0;
                             }
 
-                            snprintf(reply.texte, MAX_TEXT, "Groupes %s + %s fusionnes en %s (port %d)", g1, g2, groupes[target_idx].nom, groupes[target_idx].port_groupe);
+                                snprintf(reply.texte, MAX_TEXT, "Groupes %s + %s fusionnes en %s (port %d)", g1, g2, groupes[target_idx].nom, groupes[target_idx].port_groupe);
                         } else {
                             /* Create new group slot as before */
                             groupes[slot].actif = 1;
-                            if (newname[0] != '\0')
-                                snprintf(groupes[slot].nom, MAX_GROUP_NAME, "%s", newname);
-                            else
+                            if (newname[0] != '\0') {
+                                snprintf(groupes[slot].nom, MAX_GROUP_NAME, "%.*s", (int)(MAX_GROUP_NAME - 1), newname);
+                            } else {
                                 snprintf(groupes[slot].nom, MAX_GROUP_NAME, "%s_%s", g1, g2);
-                            snprintf(groupes[slot].moderateur, MAX_USERNAME, "%s", msg->emetteur);
+                            }
+                            snprintf(groupes[slot].moderateur, MAX_USERNAME, "%.*s", (int)(MAX_USERNAME - 1), msg->emetteur);
                             groupes[slot].port_groupe = GROUP_PORT_BASE + slot;
 
                             /* Optionnel : SHM stats */
@@ -303,7 +310,8 @@ static void handle_command(ISYMessage *msg,
                             ISYMessage migr_msg;
                             memset(&migr_msg, 0, sizeof(migr_msg));
                             strcpy(migr_msg.ordre, ORDRE_MGR);
-                            snprintf(migr_msg.emetteur, MAX_USERNAME, "%s", "SERVER");
+                            strncpy(migr_msg.emetteur, "SERVER", MAX_USERNAME - 1);
+                            migr_msg.emetteur[MAX_USERNAME - 1] = '\0';
                             strcpy(migr_msg.emoji, reply.emoji);
                             snprintf(migr_msg.texte, sizeof(migr_msg.texte), "MIGRATE %s %d", groupes[slot].nom, groupes[slot].port_groupe);
                             printf("[SERVER] Merge request: %s + %s -> %s (port %d)\n", g1, g2,
