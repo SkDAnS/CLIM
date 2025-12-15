@@ -211,6 +211,17 @@ static void add_client_direct(const char *name, const char *ip, int display_port
 
 static void broadcast_message(ISYMessage *msg)
 {
+    /* Before broadcasting, find the client and recalculate emoji based on IP */
+    for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+        if (clients[i].actif && strcmp(clients[i].nom, msg->emetteur) == 0) {
+            char ip_str[64];
+            inet_ntop(AF_INET, &clients[i].addr_cli.sin_addr, ip_str, sizeof(ip_str));
+            choose_emoji_from_ip(ip_str, msg->emoji);
+            break;
+        }
+    }
+    
+    /* Broadcast to all active clients */
     for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
         if (clients[i].actif) {
             sendto(sock_grp, msg, sizeof(*msg), 0,
