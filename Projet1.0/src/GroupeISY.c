@@ -15,45 +15,8 @@ static void build_group_file_path(const char *group_name, char *path, size_t pat
     snprintf(path, path_size, "infoGroup/%s.txt", group_name);
 }
 
-/* Helper function to check if a user is already in the group file */
-static int is_user_already_in_file(const char *group_name, const char *username)
-{
-    ensure_infogroup_dir();
-    char filepath[256];
-    build_group_file_path(group_name, filepath, sizeof(filepath));
-    
-    FILE *f = fopen(filepath, "r");
-    if (!f) return 0;  /* File doesn't exist, so user is not in it */
-    
-    char line[256];
-    int found = 0;
-    while (fgets(line, sizeof(line), f)) {
-        char stored_user[MAX_USERNAME];
-        if (sscanf(line, "%19s:", stored_user) == 1) {
-            if (strcmp(stored_user, username) == 0) {
-                found = 1;
-                break;
-            }
-        }
-    }
-    fclose(f);
-    return found;
-}
 
-/* Add user info to the group file (name:ip:emoji) */
-static void add_user_to_group_file(const char *group_name, const char *username, 
-                                   const char *ip, const char *emoji)
-{
-    ensure_infogroup_dir();
-    char filepath[256];
-    build_group_file_path(group_name, filepath, sizeof(filepath));
-    
-    FILE *f = fopen(filepath, "a");
-    if (f) {
-        fprintf(f, "%s:%s:%s\n", username, ip, emoji);
-        fclose(f);
-    }
-}
+
 
 /* Build path to the banned IPs file for a group */
 static void build_banned_file_path(const char *group_name, char *path, size_t path_size)
@@ -198,8 +161,7 @@ static void load_group_file_into_memory(const char *group_name)
 
 /* Add a client to the group and return status. Returns 0 if added, 1 if banned, 2 if no space */
 static int add_client(const char *name,
-                       struct sockaddr_in *addr, int display_port,
-                       const char *emoji)
+                       struct sockaddr_in *addr, int display_port)
 {
     /* Extract IP address first to check if banned */
     char ip_str[64];
@@ -276,7 +238,7 @@ static void add_client_direct(const char *name, const char *ip, int display_port
             }
         }
     }
-    add_client(name, &addr, display_port, emoji);
+    add_client(name, &addr, display_port);
 }
 
 static void broadcast_message(ISYMessage *msg)
@@ -376,7 +338,7 @@ int main(int argc, char *argv[])
         if (strncmp(msg.ordre, ORDRE_CON, 3) == 0) {
             /* msg.texte contient le port d'affichage du client */
             int display_port = atoi(msg.texte);
-            int status = add_client(msg.emetteur, &addr_src, display_port, msg.emoji);
+            int status = add_client(msg.emetteur, &addr_src, display_port);
             
             /* If client was banned, send an error message */
             if (status == 1) {
@@ -407,7 +369,7 @@ int main(int argc, char *argv[])
             if (strcasecmp(msg.texte, "list") == 0) {
                 if (strcmp(msg.emetteur, moderateur) == 0) {
                     /* Read list from file */
-                    char buf[MAX_TEXT]; buf[0] = '\0';
+                    char buf[2048]; buf[0] = '\0';  /* Increased buffer size to avoid truncation warnings */
                     char filepath[256];
                     build_group_file_path(nom_groupe, filepath, sizeof(filepath));
                     
@@ -421,12 +383,20 @@ int main(int argc, char *argv[])
                             char emoji[MAX_EMOJI];
                             if (sscanf(line, "%19[^:]:%63[^:]:%s", username, ip_str, emoji) == 3) {
                                 if (!first) {
-                                    strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
+                                    size_t buf_len = strlen(buf);
+                                    size_t remaining = sizeof(buf) - buf_len - 1;
+                                    if (remaining > 2) {
+                                        snprintf(buf + buf_len, remaining + 1, ", ");
+                                    }
                                 }
                                 char member_line[128];
                                 snprintf(member_line, sizeof(member_line), "%s %s (%s)", 
                                         emoji, ip_str, username);
-                                strncat(buf, member_line, sizeof(buf) - strlen(buf) - 1);
+                                size_t buf_len = strlen(buf);
+                                size_t remaining = sizeof(buf) - buf_len - 1;
+                                if (remaining > 0) {
+                                    snprintf(buf + buf_len, remaining + 1, "%s", member_line);
+                                }
                                 first = 0;
                             }
                         }
@@ -586,7 +556,8 @@ int main(int argc, char *argv[])
                 strcpy(control.ordre, ORDRE_MSG);
                 strncpy(control.emetteur, "SERVER", MAX_USERNAME - 1);
                 control.emetteur[MAX_USERNAME - 1] = '\0';
-                snprintf(control.emoji, MAX_EMOJI, "%.*s", (int)(MAX_EMOJI - 1), notice.emoji);
+                /* Use snprintf instead of strncpy to ensure null-termination and avoid warnings */
+                snprintf(control.emoji, MAX_EMOJI, "%s", notice.emoji);
                 snprintf(control.texte, sizeof(control.texte), "MIGRATE %s %d", newname, newport);
                 broadcast_message(&control);
             }
@@ -603,7 +574,7 @@ int main(int argc, char *argv[])
                     strcpy(addmsg.ordre, ORDRE_MGR);
                     strncpy(addmsg.emetteur, nom_groupe, MAX_USERNAME - 1);
                     addmsg.emetteur[MAX_USERNAME - 1] = '\0';
-                    snprintf(addmsg.emoji, MAX_EMOJI, "%.*s", (int)(MAX_EMOJI - 1), clients[i].emoji);
+                    snprintf(addmsg.emoji, MAX_EMOJI, "%s", clients[i].emoji);
                     snprintf(addmsg.texte, sizeof(addmsg.texte), "ADDCLIENT %s %s %d", clients[i].nom, ipstr, ntohs(clients[i].addr_cli.sin_port));
                     ssize_t r = sendto(sock_grp, &addmsg, sizeof(addmsg), 0, (struct sockaddr *)&addr_target, sizeof(addr_target));
                     if (r < 0) perror("sendto ADDCLIENT");
@@ -628,8 +599,8 @@ int main(int argc, char *argv[])
                 strcpy(control.ordre, ORDRE_MSG);
                 strncpy(control.emetteur, "SERVER", MAX_USERNAME - 1);
                 control.emetteur[MAX_USERNAME - 1] = '\0';
-                strncpy(control.emoji, notice.emoji, MAX_EMOJI - 1);
-                control.emoji[MAX_EMOJI - 1] = '\0';
+                /* Use snprintf to copy emoji and ensure null-termination */
+                snprintf(control.emoji, MAX_EMOJI, "%s", notice.emoji);
                 snprintf(control.texte, sizeof(control.texte), "MIGRATE %s %d", newname, newport);
                 broadcast_message(&control);
             }
