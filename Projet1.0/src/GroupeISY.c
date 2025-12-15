@@ -114,6 +114,30 @@ static GroupStats *stats = NULL;
 /* current group name stored for use in helper functions */
 static char g_group_name[MAX_GROUP_NAME];
 
+/* Rebuild the group file from current active clients */
+static void rebuild_group_file(const char *group_name)
+{
+    ensure_infogroup_dir();
+    char filepath[256];
+    build_group_file_path(group_name, filepath, sizeof(filepath));
+    
+    /* Delete old file */
+    unlink(filepath);
+    
+    /* Recreate with current active clients */
+    FILE *f = fopen(filepath, "w");
+    if (f) {
+        for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+            if (clients[i].actif) {
+                char ip_str[64];
+                inet_ntop(AF_INET, &clients[i].addr_cli.sin_addr, ip_str, sizeof(ip_str));
+                fprintf(f, "%s:%s:%s\n", clients[i].nom, ip_str, clients[i].emoji);
+            }
+        }
+        fclose(f);
+    }
+}
+
 void handle_sigint(int sig)
 {
     (void)sig;
@@ -147,10 +171,8 @@ static int add_client(const char *name,
             printf("Client %s ajouté (port %d)\n",
                    name, display_port);
 
-            /* Extract IP address and add to group file (only if not already present) */
-            if (!is_user_already_in_file(g_group_name, name)) {
-                add_user_to_group_file(g_group_name, name, ip_str, emoji);
-            }
+            /* Rebuild the group file with all current clients */
+            rebuild_group_file(g_group_name);
             
             return 0;  /* Success */
         }
@@ -314,7 +336,7 @@ int main(int argc, char *argv[])
                                 }
                                 char member_line[128];
                                 snprintf(member_line, sizeof(member_line), "%s %s (%s)", 
-                                        emoji, username, ip_str);
+                                        emoji, ip_str, username);
                                 strncat(buf, member_line, sizeof(buf) - strlen(buf) - 1);
                                 first = 0;
                             }
@@ -390,6 +412,25 @@ int main(int argc, char *argv[])
                             clients[found_client].actif = 0;
                             if (stats) stats->nb_clients--;
                             
+                            /* Send ban message directly to the banned client to force them out */
+                            ISYMessage ban_msg;
+                            memset(&ban_msg, 0, sizeof(ban_msg));
+                            strcpy(ban_msg.ordre, ORDRE_MSG);
+                            snprintf(ban_msg.emetteur, MAX_USERNAME, "SERVER");
+                            choose_emoji_from_username("SERVER", ban_msg.emoji);
+                            strncpy(ban_msg.groupe, nom_groupe, MAX_GROUP_NAME - 1);
+                            snprintf(ban_msg.texte, sizeof(ban_msg.texte), "VOUS_ETES_BANNI");
+                            
+                            struct sockaddr_in addr_banned;
+                            memset(&addr_banned, 0, sizeof(addr_banned));
+                            addr_banned.sin_family = AF_INET;
+                            addr_banned.sin_addr = clients[found_client].addr_cli.sin_addr;
+                            addr_banned.sin_port = clients[found_client].addr_cli.sin_port;
+                            
+                            ssize_t s = sendto(sock_grp, &ban_msg, sizeof(ban_msg), 0,
+                                               (struct sockaddr *)&addr_banned, sizeof(addr_banned));
+                            if (s < 0) perror("sendto force ban message");
+                            
                             /* Notify all clients that someone was banned */
                             ISYMessage ban_notice;
                             memset(&ban_notice, 0, sizeof(ban_notice));
@@ -401,6 +442,9 @@ int main(int argc, char *argv[])
                             snprintf(ban_notice.texte, sizeof(ban_notice.texte), "%s a ete banni du groupe (%s)", 
                                     banned_username, ban_ip);
                             broadcast_message(&ban_notice);
+                            
+                            /* Rebuild the group file with remaining clients */
+                            rebuild_group_file(nom_groupe);
                             
                             printf("Client %s (%s) a ete banni du groupe %s\n", 
                                    banned_username, ban_ip, nom_groupe);
