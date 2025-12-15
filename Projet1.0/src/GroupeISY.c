@@ -278,9 +278,12 @@ int main(int argc, char *argv[])
                 error_msg.groupe[MAX_GROUP_NAME - 1] = '\0';
                 snprintf(error_msg.texte, sizeof(error_msg.texte), "VOUS_ETES_BANNI");
                 
-                /* Send error message to the banned client */
+                /* Send error message to the banned client's display port */
+                struct sockaddr_in addr_display;
+                memcpy(&addr_display, &addr_src, sizeof(addr_src));
+                addr_display.sin_port = htons(display_port);
                 ssize_t s = sendto(sock_grp, &error_msg, sizeof(error_msg), 0,
-                                   (struct sockaddr *)&addr_src, sizeof(addr_src));
+                                   (struct sockaddr *)&addr_display, sizeof(addr_display));
                 if (s < 0) perror("sendto ban error");
             }
         }
