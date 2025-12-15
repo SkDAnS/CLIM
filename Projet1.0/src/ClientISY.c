@@ -142,6 +142,7 @@ static void sleep_ms(unsigned int ms)
 static const char *detect_terminal(void)
 {
     static const char *candidates[] = {
+        "kitty",
         "gnome-terminal",
         "konsole",
         "xfce4-terminal",
@@ -192,9 +193,13 @@ static pid_t start_affichage(void)
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
 
-        /* Construire la commande simple qui lance AffichageISY dans le répertoire projet */
-        char cmd[1024];
-        snprintf(cmd, sizeof(cmd), "cd '%s' && exec ./bin/AffichageISY %s %s", project_path, port_str, cfg.username);
+          /* Construire la commande simple qui lance AffichageISY dans le répertoire projet.
+              Prefixer des variables d'environnement pour forcer un rendu logiciel (éviter ZINK/MESA errors)
+              et rediriger stderr vers /dev/null pour supprimer les warnings libEGL/mesa qui apparaissent
+              sur certaines machines sans GPU/D-Bus disponible. Si vous préférez voir les erreurs,
+              retirez la redirection `2>/dev/null` et/ou l'une des variables d'environnement. */
+          char cmd[1024];
+          snprintf(cmd, sizeof(cmd), "cd '%s' && MESA_LOADER_DRIVER_OVERRIDE=swrast LIBGL_ALWAYS_SOFTWARE=1 ./bin/AffichageISY %s %s 2>/dev/null", project_path, port_str, cfg.username);
 
         /* Make the child the leader of a new session so we can signal the whole
            process group (the terminal and its children) from the parent. */
@@ -212,10 +217,25 @@ static pid_t start_affichage(void)
 
         /* Debug: afficher le terminal choisi */
         printf("[DEBUG] Terminal détecté: %s\n", term ? term : "aucun");
+        /* Ensure child inherits a UTF-8 locale so emoji bytes render correctly when the terminal/font supports them. */
+        /* Note: the system must actually have the locale generated (eg. en_US.UTF-8); if not, set it system-wide or generate it. */
+        setenv("LANG", "en_US.UTF-8", 0);
+        setenv("LC_ALL", "en_US.UTF-8", 0);
+
+        /* Allow user to override which X display to use when launching AffichageISY.
+           Useful when the default DISPLAY isn't set or when running under WSL/remote sessions. */
+        const char *aff_display = getenv("AFF_DISPLAY");
+        if (aff_display && aff_display[0] != '\0') {
+            setenv("DISPLAY", aff_display, 1);
+        }
+
         if (strcmp(term, "gnome-terminal") == 0) {
             execlp("gnome-terminal", "gnome-terminal", "--", "bash", "-c", cmd, (char *)NULL);
+        } else if (strcmp(term, "xterm") == 0) {
+            /* xterm needs -u8 to enable UTF-8 mode on some builds; also allow the user to set a font via X resources if needed */
+            execlp("xterm", "xterm", "-u8", "-e", "bash", "-c", cmd, (char *)NULL);
         } else {
-            /* La plupart des terminaux acceptent -e pour exécuter une commande dans une nouvelle fenêtre */
+            /* Most terminals accept -e to execute a command in a new window */
             execlp(term, term, "-e", "bash", "-c", cmd, (char *)NULL);
         }
 
