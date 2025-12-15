@@ -640,14 +640,14 @@ int main(void)
             char g1[MAX_GROUP_NAME];
             char g2[MAX_GROUP_NAME];
             char newname[MAX_GROUP_NAME];
-            printf("Nom du premier groupe : ");
+            printf("Nom du groupe de personne à déplacer : ");
             if (!fgets(g1, sizeof(g1), stdin)) continue;
             g1[strcspn(g1, "\n")] = '\0';
-            printf("Nom du second groupe : ");
+            printf("Nom du second groupe destinataire : ");
             if (!fgets(g2, sizeof(g2), stdin)) continue;
             g2[strcspn(g2, "\n")] = '\0';
-            printf("Nom du nouveau groupe : ");
-            if (!fgets(newname, sizeof(newname), stdin)) continue;
+            //printf("Nom du nouveau groupe : ");
+            //if (!fgets(newname, sizeof(newname), stdin)) continue;
             newname[strcspn(newname, "\n")] = '\0';
 
             /* Stop AffichageISY before merging so we don't receive messages from old groups */

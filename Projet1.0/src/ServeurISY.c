@@ -412,7 +412,101 @@ static void handle_command(ISYMessage *msg,
                 }
                 
                 /* Merge members of g1 into g2, avoiding duplicates by IP */
-                merge_group_member_files(g1, g2, g2);
+                /* First read both files before deleting them */
+                typedef struct {
+                    char username[MAX_USERNAME];
+                    char ip[64];
+                    char emoji[MAX_EMOJI];
+                } MergedMember;
+                
+                MergedMember merged[512];
+                int merged_count = 0;
+                
+                /* Read from g1 */
+                {
+                    char filepath[256];
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
+                    FILE *f = fopen(filepath, "r");
+                    if (f) {
+                        char line[256];
+                        while (fgets(line, sizeof(line), f) && merged_count < 512) {
+                            char username[MAX_USERNAME];
+                            char ip[64];
+                            char emoji[MAX_EMOJI];
+                            if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
+                                /* Check if IP already exists */
+                                int found = 0;
+                                for (int i = 0; i < merged_count; ++i) {
+                                    if (strcmp(merged[i].ip, ip) == 0) {
+                                        found = 1;
+                                        break;
+                                    }
+                                }
+                                if (!found) {
+                                    snprintf(merged[merged_count].username, MAX_USERNAME, "%s", username);
+                                    snprintf(merged[merged_count].ip, 64, "%s", ip);
+                                    snprintf(merged[merged_count].emoji, MAX_EMOJI, "%s", emoji);
+                                    merged_count++;
+                                }
+                            }
+                        }
+                        fclose(f);
+                    }
+                }
+                
+                /* Read from g2 */
+                {
+                    char filepath[256];
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
+                    FILE *f = fopen(filepath, "r");
+                    if (f) {
+                        char line[256];
+                        while (fgets(line, sizeof(line), f) && merged_count < 512) {
+                            char username[MAX_USERNAME];
+                            char ip[64];
+                            char emoji[MAX_EMOJI];
+                            if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
+                                /* Check if IP already exists */
+                                int found = 0;
+                                for (int i = 0; i < merged_count; ++i) {
+                                    if (strcmp(merged[i].ip, ip) == 0) {
+                                        found = 1;
+                                        break;
+                                    }
+                                }
+                                if (!found) {
+                                    snprintf(merged[merged_count].username, MAX_USERNAME, "%s", username);
+                                    snprintf(merged[merged_count].ip, 64, "%s", ip);
+                                    snprintf(merged[merged_count].emoji, MAX_EMOJI, "%s", emoji);
+                                    merged_count++;
+                                }
+                            }
+                        }
+                        fclose(f);
+                    }
+                }
+                
+                /* Delete both original files */
+                {
+                    char filepath[256];
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
+                    unlink(filepath);
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
+                    unlink(filepath);
+                }
+                
+                /* Write merged result to g2 */
+                {
+                    char filepath[256];
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
+                    FILE *f = fopen(filepath, "w");
+                    if (f) {
+                        for (int i = 0; i < merged_count; ++i) {
+                            fprintf(f, "%s:%s:%s\n", merged[i].username, merged[i].ip, merged[i].emoji);
+                        }
+                        fclose(f);
+                    }
+                }
                 
                 /* Notify g1 clients to migrate to g2 */
                 ISYMessage migr_msg;
@@ -455,11 +549,9 @@ static void handle_command(ISYMessage *msg,
                 groupes[idx1].shm_key = 0;
                 groupes[idx1].actif = 0;
                 
-                /* Clean up the group info files */
+                /* Clean up g1 ban file (g1.txt already deleted during merge) */
                 {
                     char filepath[256];
-                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
-                    unlink(filepath);
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", g1);
                     unlink(filepath);
                 }
