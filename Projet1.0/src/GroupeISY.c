@@ -166,10 +166,15 @@ static int add_client(const char *name,
             snprintf(clients[i].nom, MAX_USERNAME, "%s", name);
             clients[i].addr_cli = *addr;
             clients[i].addr_cli.sin_port = htons(display_port);
-            snprintf(clients[i].emoji, MAX_EMOJI, "%s", emoji);
+            
+            /* Assign emoji based on IP address, not username */
+            char emoji_from_ip[MAX_EMOJI];
+            choose_emoji_from_ip(ip_str, emoji_from_ip);
+            snprintf(clients[i].emoji, MAX_EMOJI, "%s", emoji_from_ip);
+            
             if (stats) stats->nb_clients++;
-            printf("Client %s ajouté (port %d)\n",
-                   name, display_port);
+            printf("Client %s ajouté (port %d, IP: %s, emoji: %s)\n",
+                   name, display_port, ip_str, emoji_from_ip);
 
             /* Rebuild the group file with all current clients */
             rebuild_group_file(g_group_name);

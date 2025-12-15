@@ -53,6 +53,104 @@ void handle_sigint(int sig)
     exit(0);
 }
 
+/* Merge member lists from two groups into target group, avoiding duplicate IPs */
+static void merge_group_member_files(const char *src1, const char *src2, const char *target)
+{
+    /* Read all members from both source files, store unique IPs in a map */
+    #define MAX_MERGED_MEMBERS 256
+    typedef struct {
+        char username[MAX_USERNAME];
+        char ip[64];
+        char emoji[MAX_EMOJI];
+    } MergedMember;
+    
+    MergedMember members[MAX_MERGED_MEMBERS];
+    int member_count = 0;
+    
+    /* Helper: check if IP already exists */
+    int ip_exists(const char *ip) {
+        for (int i = 0; i < member_count; ++i) {
+            if (strcmp(members[i].ip, ip) == 0) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    
+    /* Helper: add member if not duplicate */
+    void add_member(const char *username, const char *ip, const char *emoji) {
+        if (!ip_exists(ip) && member_count < MAX_MERGED_MEMBERS) {
+            snprintf(members[member_count].username, MAX_USERNAME, "%s", username);
+            snprintf(members[member_count].ip, 64, "%s", ip);
+            snprintf(members[member_count].emoji, MAX_EMOJI, "%s", emoji);
+            member_count++;
+        }
+    }
+    
+    /* Read from src1 */
+    {
+        char filepath[256];
+        snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", src1);
+        FILE *f = fopen(filepath, "r");
+        if (f) {
+            char line[256];
+            while (fgets(line, sizeof(line), f)) {
+                char username[MAX_USERNAME];
+                char ip[64];
+                char emoji[MAX_EMOJI];
+                if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
+                    if (!ip_exists(ip) && member_count < MAX_MERGED_MEMBERS) {
+                        snprintf(members[member_count].username, MAX_USERNAME, "%s", username);
+                        snprintf(members[member_count].ip, 64, "%s", ip);
+                        snprintf(members[member_count].emoji, MAX_EMOJI, "%s", emoji);
+                        member_count++;
+                    }
+                }
+            }
+            fclose(f);
+        }
+    }
+    
+    /* Read from src2 */
+    {
+        char filepath[256];
+        snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", src2);
+        FILE *f = fopen(filepath, "r");
+        if (f) {
+            char line[256];
+            while (fgets(line, sizeof(line), f)) {
+                char username[MAX_USERNAME];
+                char ip[64];
+                char emoji[MAX_EMOJI];
+                if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
+                    if (!ip_exists(ip) && member_count < MAX_MERGED_MEMBERS) {
+                        snprintf(members[member_count].username, MAX_USERNAME, "%s", username);
+                        snprintf(members[member_count].ip, 64, "%s", ip);
+                        snprintf(members[member_count].emoji, MAX_EMOJI, "%s", emoji);
+                        member_count++;
+                    }
+                }
+            }
+            fclose(f);
+        }
+    }
+    
+    /* Write merged list to target file */
+    {
+        char filepath[256];
+        snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", target);
+        FILE *f = fopen(filepath, "w");
+        if (f) {
+            for (int i = 0; i < member_count; ++i) {
+                fprintf(f, "%s:%s:%s\n", members[i].username, members[i].ip, members[i].emoji);
+            }
+            fclose(f);
+        }
+    }
+    
+    #undef MAX_MERGED_MEMBERS
+}
+
 /* Cherche un groupe par nom, renvoie son index ou -1 */
 static int find_group(const char *name)
 {
@@ -364,6 +462,9 @@ static void handle_command(ISYMessage *msg,
                             if (idx1 != target_idx) sendto(sock_srv, &notify, sizeof(notify), 0, (struct sockaddr*)&addrOld1, sizeof(addrOld1));
                             if (idx2 != target_idx) sendto(sock_srv, &notify, sizeof(notify), 0, (struct sockaddr*)&addrOld2, sizeof(addrOld2));
 
+                            /* Merge member files from both groups into target (without duplicate IPs) */
+                            merge_group_member_files(g1, g2, groupes[target_idx].nom);
+
                             /* Kill and cleanup old groups except the target group */
                             if (groupes[idx1].pid > 0 && idx1 != target_idx) {
                                 pid_t pid1 = groupes[idx1].pid;
@@ -429,6 +530,9 @@ static void handle_command(ISYMessage *msg,
                             printf("[SERVER] Groupe %s cree (slot %d, port %d, pid %d)\n",
                                 groupes[slot].nom, slot, groupes[slot].port_groupe, (int)groupes[slot].pid);
                             fflush(stdout);
+
+                            /* Merge member files from both old groups into the new group (without duplicate IPs) */
+                            merge_group_member_files(g1, g2, groupes[slot].nom);
 
                             /* Notify old groups to inform their clients */
                             ISYMessage migr_msg;

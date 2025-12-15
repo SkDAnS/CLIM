@@ -152,4 +152,49 @@ static inline void choose_emoji_from_username(const char *username, char *emoji_
     }
 }
 
+/* Choose emoji based on IP address (deterministic, same IP always gets same emoji) */
+static inline void choose_emoji_from_ip(const char *ip_str, char *emoji_buf)
+{
+    if (!ip_str || ip_str[0] == '\0') {
+        strcpy(emoji_buf, "😀");  /* Default: U+1F600 */
+        return;
+    }
+
+    /* Calcul du hash de l'IP */
+    size_t n = strlen(ip_str);
+    unsigned int hash = 0;
+    for (size_t i = 0; i < n; ++i) {
+        hash = (hash * 31u) + (unsigned char)ip_str[i];
+    }
+
+    /* Sélectionner un emoji dans la plage U+1F600 à U+1F64F (48 emojis) */
+    int emoji_index = hash % 48;
+    unsigned int codepoint = 0x1F600 + emoji_index;
+
+    /* Encoder le codepoint en UTF-8 */
+    if (codepoint <= 0x7F) {
+        /* 1 byte */
+        emoji_buf[0] = (char)codepoint;
+        emoji_buf[1] = '\0';
+    } else if (codepoint <= 0x7FF) {
+        /* 2 bytes */
+        emoji_buf[0] = (char)(0xC0 | (codepoint >> 6));
+        emoji_buf[1] = (char)(0x80 | (codepoint & 0x3F));
+        emoji_buf[2] = '\0';
+    } else if (codepoint <= 0xFFFF) {
+        /* 3 bytes */
+        emoji_buf[0] = (char)(0xE0 | (codepoint >> 12));
+        emoji_buf[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        emoji_buf[2] = (char)(0x80 | (codepoint & 0x3F));
+        emoji_buf[3] = '\0';
+    } else {
+        /* 4 bytes (for emojis) */
+        emoji_buf[0] = (char)(0xF0 | (codepoint >> 18));
+        emoji_buf[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        emoji_buf[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        emoji_buf[3] = (char)(0x80 | (codepoint & 0x3F));
+        emoji_buf[4] = '\0';
+    }
+}
+
 #endif /* COMMUN_H */
