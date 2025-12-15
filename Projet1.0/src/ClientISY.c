@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/select.h>
 
 
 
@@ -537,25 +538,46 @@ int main(void)
                 }
                 connect_to_group(group_name, port_groupe);
 
-                /* Boucle de dialogue simple */
+                /* Boucle de dialogue avec monitoring du processus d'affichage */
                 printf("Entrez vos messages (\"quit\" pour revenir au menu) :\n");
+                
                 while (1) {
-                    /* Check if display process is still running */
-                    if (pid_affichage > 0) {
-                        int status;
-                        pid_t r = waitpid(pid_affichage, &status, WNOHANG);
-                        if (r == pid_affichage) {
-                            /* Display process exited - likely due to ban */
-                            if (shm_cli && shm_cli->running == 0) {
-                                printf("\n🚫 VOUS AVEZ ÉTÉ BANNI DE CE GROUPE!\n");
-                                printf("Retour au menu principal...\n\n");
-                            }
-                            pid_affichage = -1;
-                            break;
+                    /* Check every 100ms if display process is still running */
+                    int status;
+                    pid_t r = waitpid(pid_affichage, &status, WNOHANG);
+                    if (r == pid_affichage) {
+                        /* Display process exited */
+                        if (shm_cli && shm_cli->running == 0) {
+                            printf("\n🚫 VOUS AVEZ ÉTÉ BANNI DE CE GROUPE!\n");
+                            printf("Retour au menu principal...\n\n");
                         }
+                        pid_affichage = -1;
+                        break;
                     }
                     
+                    /* Use select() to wait for stdin with timeout */
+                    fd_set readfds;
+                    struct timeval tv;
+                    FD_ZERO(&readfds);
+                    FD_SET(STDIN_FILENO, &readfds);
+                    tv.tv_sec = 0;
+                    tv.tv_usec = 100000;  /* 100ms timeout */
+                    
+                    int sel = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
+                    
+                    if (sel < 0) {
+                        perror("select");
+                        break;
+                    }
+                    
+                    if (sel == 0) {
+                        /* Timeout - loop back to check process status */
+                        continue;
+                    }
+                    
+                    /* stdin is ready */
                     printf("> ");
+                    fflush(stdout);
                     if (!fgets(buffer, sizeof(buffer), stdin))
                         break;
                     buffer[strcspn(buffer, "\n")] = '\0';
