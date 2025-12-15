@@ -64,6 +64,15 @@ int main(int argc, char *argv[])
 
 
         if (strncmp(msg.ordre, ORDRE_MSG, 3) == 0) {
+            /* Check if this is a ban message */
+            if (strcmp(msg.texte, "VOUS_ETES_BANNI") == 0) {
+                printf("\n🚫 VOUS AVEZ ÉTÉ BANNI DE CE GROUPE!\n\n");
+                fflush(stdout);
+                /* Signal client to return to menu */
+                shm->running = 0;
+                break;
+            }
+            
             printf("[%s] %s %s : %s\n",
                    msg.groupe,
                    msg.emoji,

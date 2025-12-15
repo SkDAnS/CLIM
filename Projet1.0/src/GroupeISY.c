@@ -55,6 +55,50 @@ static void add_user_to_group_file(const char *group_name, const char *username,
     }
 }
 
+/* Build path to the banned IPs file for a group */
+static void build_banned_file_path(const char *group_name, char *path, size_t path_size)
+{
+    snprintf(path, path_size, "infoGroup/%s_banned.txt", group_name);
+}
+
+/* Check if an IP is banned from a group */
+static int is_ip_banned(const char *group_name, const char *ip)
+{
+    char filepath[256];
+    build_banned_file_path(group_name, filepath, sizeof(filepath));
+    
+    FILE *f = fopen(filepath, "r");
+    if (!f) return 0;  /* No ban file means no bans */
+    
+    char line[64];
+    int found = 0;
+    while (fgets(line, sizeof(line), f)) {
+        /* Remove newline if present */
+        char *p = strchr(line, '\n');
+        if (p) *p = '\0';
+        if (strcmp(line, ip) == 0) {
+            found = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+/* Add an IP to the banned list of a group */
+static void ban_ip_from_group(const char *group_name, const char *ip)
+{
+    ensure_infogroup_dir();
+    char filepath[256];
+    build_banned_file_path(group_name, filepath, sizeof(filepath));
+    
+    FILE *f = fopen(filepath, "a");
+    if (f) {
+        fprintf(f, "%s\n", ip);
+        fclose(f);
+    }
+}
+
 /* Liste des clients d'un groupe */
 typedef struct {
     int actif;
@@ -76,10 +120,22 @@ void handle_sigint(int sig)
     running = 0;
 }
 
-static void add_client(const char *name,
+/* Add a client to the group and return status. Returns 0 if added, 1 if banned, 2 if no space */
+static int add_client(const char *name,
                        struct sockaddr_in *addr, int display_port,
                        const char *emoji)
 {
+    /* Extract IP address first to check if banned */
+    char ip_str[64];
+    inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
+    
+    /* Check if this IP is banned from the group */
+    if (is_ip_banned(g_group_name, ip_str)) {
+        printf("Client %s (%s) rejected: IP is banned from group %s\n", 
+               name, ip_str, g_group_name);
+        return 1;  /* Indicate ban */
+    }
+    
     for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
         if (!clients[i].actif) {
             clients[i].actif = 1;
@@ -92,17 +148,15 @@ static void add_client(const char *name,
                    name, display_port);
 
             /* Extract IP address and add to group file (only if not already present) */
-            char ip_str[64];
-            inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
-            
             if (!is_user_already_in_file(g_group_name, name)) {
                 add_user_to_group_file(g_group_name, name, ip_str, emoji);
             }
             
-            return;
+            return 0;  /* Success */
         }
     }
     printf("Plus de place pour de nouveaux clients dans ce groupe\n");
+    return 2;  /* No space */
 }
 
 /* Add a client by explicit IP and port (used to transfer clients from another group) */
@@ -211,7 +265,24 @@ int main(int argc, char *argv[])
         if (strncmp(msg.ordre, ORDRE_CON, 3) == 0) {
             /* msg.texte contient le port d'affichage du client */
             int display_port = atoi(msg.texte);
-            add_client(msg.emetteur, &addr_src, display_port, msg.emoji);
+            int status = add_client(msg.emetteur, &addr_src, display_port, msg.emoji);
+            
+            /* If client was banned, send an error message */
+            if (status == 1) {
+                ISYMessage error_msg;
+                memset(&error_msg, 0, sizeof(error_msg));
+                strcpy(error_msg.ordre, ORDRE_MSG);
+                snprintf(error_msg.emetteur, MAX_USERNAME, "SERVER");
+                choose_emoji_from_username("SERVER", error_msg.emoji);
+                strncpy(error_msg.groupe, nom_groupe, MAX_GROUP_NAME - 1);
+                error_msg.groupe[MAX_GROUP_NAME - 1] = '\0';
+                snprintf(error_msg.texte, sizeof(error_msg.texte), "VOUS_ETES_BANNI");
+                
+                /* Send error message to the banned client */
+                ssize_t s = sendto(sock_grp, &error_msg, sizeof(error_msg), 0,
+                                   (struct sockaddr *)&addr_src, sizeof(addr_src));
+                if (s < 0) perror("sendto ban error");
+            }
         }
         else if (strncmp(msg.ordre, ORDRE_MSG, 3) == 0) {
             if (stats) stats->nb_messages++;
@@ -287,6 +358,71 @@ int main(int argc, char *argv[])
                     snprintf(deny.texte, sizeof(deny.texte), "Permission refusee: seul le moderateur peut lister les membres");
                     ssize_t s = sendto(sock_grp, &deny, sizeof(deny), 0, (struct sockaddr *)&addr_src, sizeof(addr_src));
                     if (s < 0) perror("sendto deny");
+                }
+            } else if (strncmp(msg.texte, "ban ", 4) == 0) {
+                /* Ban command: "ban <ip>" - only moderator can use this */
+                if (strcmp(msg.emetteur, moderateur) == 0) {
+                    char ban_ip[64] = {0};
+                    if (sscanf(msg.texte, "ban %63s", ban_ip) == 1) {
+                        /* Find and disconnect the client with this IP */
+                        int found_client = -1;
+                        for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+                            if (clients[i].actif) {
+                                char client_ip[64];
+                                inet_ntop(AF_INET, &clients[i].addr_cli.sin_addr, client_ip, sizeof(client_ip));
+                                if (strcmp(client_ip, ban_ip) == 0) {
+                                    found_client = i;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (found_client != -1) {
+                            /* Ban the IP from the group */
+                            ban_ip_from_group(nom_groupe, ban_ip);
+                            
+                            /* Remove the client from active clients */
+                            char banned_username[MAX_USERNAME];
+                            snprintf(banned_username, sizeof(banned_username), "%s", clients[found_client].nom);
+                            clients[found_client].actif = 0;
+                            if (stats) stats->nb_clients--;
+                            
+                            /* Notify all clients that someone was banned */
+                            ISYMessage ban_notice;
+                            memset(&ban_notice, 0, sizeof(ban_notice));
+                            strcpy(ban_notice.ordre, ORDRE_MSG);
+                            snprintf(ban_notice.emetteur, MAX_USERNAME, "SERVER");
+                            choose_emoji_from_username("SERVER", ban_notice.emoji);
+                            strncpy(ban_notice.groupe, nom_groupe, MAX_GROUP_NAME - 1);
+                            ban_notice.groupe[MAX_GROUP_NAME - 1] = '\0';
+                            snprintf(ban_notice.texte, sizeof(ban_notice.texte), "%s a ete banni du groupe (%s)", 
+                                    banned_username, ban_ip);
+                            broadcast_message(&ban_notice);
+                            
+                            printf("Client %s (%s) a ete banni du groupe %s\n", 
+                                   banned_username, ban_ip, nom_groupe);
+                        } else {
+                            /* IP not found in current clients */
+                            ISYMessage error;
+                            memset(&error, 0, sizeof(error));
+                            strcpy(error.ordre, ORDRE_MSG);
+                            snprintf(error.emetteur, MAX_USERNAME, "SERVER");
+                            choose_emoji_from_username("SERVER", error.emoji);
+                            snprintf(error.texte, sizeof(error.texte), "IP %s non trouvee dans le groupe", ban_ip);
+                            ssize_t s = sendto(sock_grp, &error, sizeof(error), 0, (struct sockaddr *)&addr_src, sizeof(addr_src));
+                            if (s < 0) perror("sendto ban error");
+                        }
+                    }
+                } else {
+                    /* Only moderator can ban */
+                    ISYMessage deny;
+                    memset(&deny, 0, sizeof(deny));
+                    strcpy(deny.ordre, ORDRE_MSG);
+                    snprintf(deny.emetteur, MAX_USERNAME, "SERVER");
+                    choose_emoji_from_username("SERVER", deny.emoji);
+                    snprintf(deny.texte, sizeof(deny.texte), "Permission refusee: seul le moderateur peut bannir");
+                    ssize_t s = sendto(sock_grp, &deny, sizeof(deny), 0, (struct sockaddr *)&addr_src, sizeof(addr_src));
+                    if (s < 0) perror("sendto deny ban");
                 }
             } else {
                 broadcast_message(&msg);

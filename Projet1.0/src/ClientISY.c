@@ -518,7 +518,20 @@ int main(void)
 
             printf("Réponse serveur : %s\n", reply);
 
+            /* Check if banned before trying to connect */
             if (port_groupe > 0) {
+                /* First check if this client is banned from the group */
+                char checkban_cmd[128];
+                snprintf(checkban_cmd, sizeof(checkban_cmd), "CHECKBAN %s", group_name);
+                
+                char ban_reply[256];
+                send_command_to_server(checkban_cmd, ban_reply, sizeof(ban_reply), NULL, NULL);
+                
+                if (strncmp(ban_reply, "BANNED", 6) == 0) {
+                    printf("\n❌ ERREUR: Vous avez été banni de ce groupe et ne pouvez pas le rejoindre.\n\n");
+                    continue;  /* Go back to menu */
+                }
+                
                 if (pid_affichage <= 0) {
                     pid_affichage = start_affichage();
                 }
@@ -527,6 +540,21 @@ int main(void)
                 /* Boucle de dialogue simple */
                 printf("Entrez vos messages (\"quit\" pour revenir au menu) :\n");
                 while (1) {
+                    /* Check if display process is still running */
+                    if (pid_affichage > 0) {
+                        int status;
+                        pid_t r = waitpid(pid_affichage, &status, WNOHANG);
+                        if (r == pid_affichage) {
+                            /* Display process exited - likely due to ban */
+                            if (shm_cli && shm_cli->running == 0) {
+                                printf("\n🚫 VOUS AVEZ ÉTÉ BANNI DE CE GROUPE!\n");
+                                printf("Retour au menu principal...\n\n");
+                            }
+                            pid_affichage = -1;
+                            break;
+                        }
+                    }
+                    
                     printf("> ");
                     if (!fgets(buffer, sizeof(buffer), stdin))
                         break;

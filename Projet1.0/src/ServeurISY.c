@@ -38,7 +38,7 @@ static void cleanup_infogroup_files(void)
         if (entry->d_type == DT_REG) {  /* Regular file */
             char filepath[256];
             snprintf(filepath, sizeof(filepath), "infoGroup/%s", entry->d_name);
-            unlink(filepath);  /* Delete the file */
+            unlink(filepath);  /* Delete the file (both group info and banned files) */
         }
     }
     closedir(dir);
@@ -243,6 +243,45 @@ static void handle_command(ISYMessage *msg,
             reply.groupe[MAX_GROUP_NAME - 1] = '\0';
         }
     }
+    else if (strcmp(cmd, "CHECKBAN") == 0) {
+        /* Check if the client's IP (from source) is banned from a group */
+        /* Expected format: CHECKBAN <group_name> */
+        char group_name[64] = {0};
+        sscanf(msg->texte, "%15s %63s", cmd, group_name);
+        
+        if (group_name[0] == '\0') {
+            strcpy(reply.texte, "Usage: CHECKBAN <group_name>");
+        } else {
+            /* Get the client's IP from the source address */
+            char client_ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &src->sin_addr, client_ip, sizeof(client_ip));
+            
+            /* Check if the banned IPs file exists and contains this IP */
+            char filepath[256];
+            snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", group_name);
+            
+            int is_banned = 0;
+            FILE *f = fopen(filepath, "r");
+            if (f) {
+                char line[64];
+                while (fgets(line, sizeof(line), f)) {
+                    char *p = strchr(line, '\n');
+                    if (p) *p = '\0';
+                    if (strcmp(line, client_ip) == 0) {
+                        is_banned = 1;
+                        break;
+                    }
+                }
+                fclose(f);
+            }
+            
+            if (is_banned) {
+                snprintf(reply.texte, MAX_TEXT, "BANNED");
+            } else {
+                snprintf(reply.texte, MAX_TEXT, "OK");
+            }
+        }
+    }
     else if (strcmp(cmd, "MERGE") == 0) {
         /* Expected: MERGE <g1> <g2> <newname> */
         char g1[64] = {0};
@@ -341,6 +380,9 @@ static void handle_command(ISYMessage *msg,
                                     char filepath[256];
                                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
                                     unlink(filepath);
+                                    /* Also clean up the banned list file */
+                                    snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", g1);
+                                    unlink(filepath);
                                 }
                             }
                             if (groupes[idx2].pid > 0 && idx2 != target_idx) {
@@ -357,6 +399,9 @@ static void handle_command(ISYMessage *msg,
                                 {
                                     char filepath[256];
                                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
+                                    unlink(filepath);
+                                    /* Also clean up the banned list file */
+                                    snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", g2);
                                     unlink(filepath);
                                 }
                             }
@@ -425,6 +470,9 @@ static void handle_command(ISYMessage *msg,
                                     char filepath[256];
                                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
                                     unlink(filepath);
+                                    /* Also clean up the banned list file */
+                                    snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", g1);
+                                    unlink(filepath);
                                 }
                             }
                             if (groupes[idx2].pid > 0) {
@@ -441,6 +489,9 @@ static void handle_command(ISYMessage *msg,
                                 {
                                     char filepath[256];
                                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
+                                    unlink(filepath);
+                                    /* Also clean up the banned list file */
+                                    snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", g2);
                                     unlink(filepath);
                                 }
                             }
@@ -480,6 +531,9 @@ static void handle_command(ISYMessage *msg,
                     char filepath[256];
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", arg1);
                     unlink(filepath);  /* Delete the file, ignore errors */
+                    /* Also clean up the banned list file */
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", arg1);
+                    unlink(filepath);
                 }
         }
     }
