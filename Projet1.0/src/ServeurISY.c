@@ -506,6 +506,13 @@ static void handle_command(ISYMessage *msg,
         snprintf(reply.texte, MAX_TEXT,
                  "Commande inconnue: %s", cmd);
     }
+    
+    /* Send reply back to client */
+    ssize_t ret = sendto(sock_srv, &reply, sizeof(reply), 0,
+                         (struct sockaddr *)src, src_len);
+    if (ret < 0) {
+        perror("sendto reply");
+    }
 }
 
 int main(void)
