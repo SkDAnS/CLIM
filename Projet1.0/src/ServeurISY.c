@@ -138,6 +138,29 @@ static void handle_command(ISYMessage *msg,
                 groupes[slot].shm_id  = shm_id;
 
                     create_group_process(slot);
+                            /* Append new group to group_members.txt (avoid duplicates) */
+                            {
+                                FILE *f = fopen("group_members.txt", "r");
+                                int seen = 0;
+                                if (f) {
+                                    char line[256];
+                                    while (fgets(line, sizeof(line), f)) {
+                                        if (strncmp(line, "GROUP:", 6) == 0) {
+                                            char *gname = line + 6;
+                                            char *p = strchr(gname, '\n'); if (p) *p = '\0';
+                                            if (strcmp(gname, groupes[slot].nom) == 0) { seen = 1; break; }
+                                        }
+                                    }
+                                    fclose(f);
+                                }
+                                if (!seen) {
+                                    FILE *fa = fopen("group_members.txt", "a");
+                                    if (fa) {
+                                        fprintf(fa, "GROUP:%s\n", groupes[slot].nom);
+                                        fclose(fa);
+                                    }
+                                }
+                            }
                 /* Give child a moment to start and fail if exec failed */
                 msleep_ms(100); /* 100ms */
                 if (groupes[slot].pid > 0) {
@@ -161,6 +184,30 @@ static void handle_command(ISYMessage *msg,
                          "Groupe %s cree sur port %d",
                          groupes[slot].nom,
                          groupes[slot].port_groupe);
+
+                /* Append group name to group_members.txt (avoid duplicates) */
+                {
+                    FILE *f = fopen("group_members.txt", "r");
+                    int seen = 0;
+                    if (f) {
+                        char line[256];
+                        while (fgets(line, sizeof(line), f)) {
+                            if (strncmp(line, "GROUP:", 6) == 0) {
+                                char *gname = line + 6;
+                                char *p = strchr(gname, '\n'); if (p) *p = '\0';
+                                if (strcmp(gname, groupes[slot].nom) == 0) { seen = 1; break; }
+                            }
+                        }
+                        fclose(f);
+                    }
+                    if (!seen) {
+                        FILE *fa = fopen("group_members.txt", "a");
+                        if (fa) {
+                            fprintf(fa, "GROUP:%s\n", groupes[slot].nom);
+                            fclose(fa);
+                        }
+                    }
+                }
             }
         }
     }
@@ -409,6 +456,12 @@ int main(void)
     ISYMessage msg;
 
     memset(groupes, 0, sizeof(groupes));
+
+    /* Reset the persistent group/member file on server start */
+    {
+        FILE *f = fopen("group_members.txt", "w");
+        if (f) fclose(f);
+    }
 
     signal(SIGINT, handle_sigint);
 

@@ -1,4 +1,5 @@
 #include "../include/Commun.h"
+#include <strings.h>
 #include <fcntl.h>
 
 /* Liste des clients d'un groupe */
@@ -13,6 +14,8 @@ static ClientInfo clients[MAX_CLIENTS_GROUP];
 static int sock_grp;
 static int running = 1;
 static GroupStats *stats = NULL;
+/* current group name stored for use in helper functions */
+static char g_group_name[MAX_GROUP_NAME];
 
 void handle_sigint(int sig)
 {
@@ -34,6 +37,28 @@ static void add_client(const char *name,
             if (stats) stats->nb_clients++;
             printf("Client %s ajouté (port %d)\n",
                    name, display_port);
+
+            /* Append to group_members.txt to record that this user joined this group at least once. */
+            {
+                int already = 0;
+                FILE *fr = fopen("group_members.txt", "r");
+                if (fr) {
+                    char line[512];
+                    char want[256];
+                    snprintf(want, sizeof(want), "JOIN:%s:%s\n", g_group_name, name);
+                    while (fgets(line, sizeof(line), fr)) {
+                        if (strcmp(line, want) == 0) { already = 1; break; }
+                    }
+                    fclose(fr);
+                }
+                if (!already) {
+                    FILE *fa = fopen("group_members.txt", "a");
+                    if (fa) {
+                        fprintf(fa, "JOIN:%s:%s\n", g_group_name, name);
+                        fclose(fa);
+                    }
+                }
+            }
             return;
         }
     }
@@ -86,6 +111,9 @@ int main(int argc, char *argv[])
     const char *nom_groupe = argv[1];
     const char *moderateur = argv[2];
     int port = atoi(argv[3]);
+
+    /* store group name globally for helpers that need it */
+    snprintf(g_group_name, sizeof(g_group_name), "%s", nom_groupe);
 
     memset(clients, 0, sizeof(clients));
 
@@ -148,7 +176,66 @@ int main(int argc, char *argv[])
         else if (strncmp(msg.ordre, ORDRE_MSG, 3) == 0) {
             if (stats) stats->nb_messages++;
             snprintf(msg.groupe, MAX_GROUP_NAME, "%s", nom_groupe);
-            broadcast_message(&msg);
+
+            /* If moderator requests list of members by sending "list" in chat,
+               respond privately to the moderator's display with the member list. */
+            if (strcasecmp(msg.texte, "list") == 0) {
+                if (strcmp(msg.emetteur, moderateur) == 0) {
+                    /* build list */
+                    char buf[MAX_TEXT]; buf[0] = '\0';
+                    int first = 1;
+                    for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+                        if (!clients[i].actif) continue;
+                        if (!first) {
+                            strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
+                        }
+                        strncat(buf, clients[i].nom, sizeof(buf) - strlen(buf) - 1);
+                        first = 0;
+                    }
+                    if (buf[0] == '\0') snprintf(buf, sizeof(buf), "Aucun membre\n");
+
+                    ISYMessage resp;
+                    memset(&resp, 0, sizeof(resp));
+                    strcpy(resp.ordre, ORDRE_MSG);
+                    strncpy(resp.emetteur, "SERVER", MAX_USERNAME - 1);
+                    resp.emetteur[MAX_USERNAME - 1] = '\0';
+                    choose_emoji_from_username("SERVER", resp.emoji);
+                    strncpy(resp.groupe, nom_groupe, MAX_GROUP_NAME - 1);
+                    resp.groupe[MAX_GROUP_NAME - 1] = '\0';
+                    snprintf(resp.texte, sizeof(resp.texte), "%s", buf);
+
+                    /* find moderator's display address in clients[] */
+                    int found = 0;
+                    struct sockaddr_in target;
+                    memset(&target, 0, sizeof(target));
+                    for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+                        if (clients[i].actif && strcmp(clients[i].nom, msg.emetteur) == 0) {
+                            target = clients[i].addr_cli;
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        /* fallback: reply to sender address (addr_src) */
+                        target = addr_src;
+                    }
+                    ssize_t s = sendto(sock_grp, &resp, sizeof(resp), 0, (struct sockaddr *)&target, sizeof(target));
+                    if (s < 0) perror("sendto list reply");
+                } else {
+                    /* notify sender that only moderator can list */
+                    ISYMessage deny;
+                    memset(&deny,0,sizeof(deny));
+                    strcpy(deny.ordre, ORDRE_MSG);
+                    strncpy(deny.emetteur, "SERVER", MAX_USERNAME-1);
+                    deny.emetteur[MAX_USERNAME-1] = '\0';
+                    choose_emoji_from_username("SERVER", deny.emoji);
+                    snprintf(deny.texte, sizeof(deny.texte), "Permission refusee: seul le moderateur peut lister les membres");
+                    ssize_t s = sendto(sock_grp, &deny, sizeof(deny), 0, (struct sockaddr *)&addr_src, sizeof(addr_src));
+                    if (s < 0) perror("sendto deny");
+                }
+            } else {
+                broadcast_message(&msg);
+            }
         }
         else if (strncmp(msg.ordre, ORDRE_MGR, 3) == 0) {
             /* ex: MGR text = "MIGRATE newname newport" */

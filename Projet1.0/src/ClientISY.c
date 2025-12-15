@@ -310,27 +310,50 @@ static void send_command_to_server(const char *cmd,
 
     printf("[CLIENT] Sending to server %s: %s\n", cfg.server_ip, cmd);
     fflush(stdout);
-    ssize_t n = sendto(sock_cli, &msg, sizeof(msg), 0,
-                       (struct sockaddr *)&addr_srv, sizeof(addr_srv));
-    check_fatal(n < 0, "sendto serveur");
 
     struct sockaddr_in from;
     socklen_t len = sizeof(from);
     ISYMessage reply;
-    /* Add a timeout to avoid blocking indefinitely when server is not reachable */
+    /* Add a timeout and retry logic to handle the server starting after the client. */
     struct timeval tv;
-    tv.tv_sec = 3;
+    tv.tv_sec = 1; /* per-attempt timeout */
     tv.tv_usec = 0;
     setsockopt(sock_cli, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    n = recvfrom(sock_cli, &reply, sizeof(reply), 0,
-                 (struct sockaddr *)&from, &len);
-    if (n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            snprintf(reply_buf, reply_sz, "Aucun reponse du serveur (timeout)");
-            if (port_groupe_opt) *port_groupe_opt = -1;
-            if (group_name_opt) group_name_opt[0] = '\0';
-            return;
+
+    const int max_retries = 5;
+    int attempt;
+    ssize_t n = -1;
+    for (attempt = 0; attempt < max_retries; ++attempt) {
+        ssize_t sent = sendto(sock_cli, &msg, sizeof(msg), 0,
+                              (struct sockaddr *)&addr_srv, sizeof(addr_srv));
+        if (sent < 0) {
+            perror("sendto serveur");
+            /* try again after a short pause */
+            sleep_ms(200);
+            continue;
         }
+
+        n = recvfrom(sock_cli, &reply, sizeof(reply), 0,
+                     (struct sockaddr *)&from, &len);
+        if (n >= 0) break; /* success */
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            /* no response yet */
+            if (attempt < max_retries - 1) {
+                printf("[CLIENT] Aucun reponse du serveur, tentative %d/%d...\n", attempt + 1, max_retries);
+                fflush(stdout);
+                sleep_ms(200);
+                continue;
+            } else {
+                /* final attempt failed */
+                snprintf(reply_buf, reply_sz, "Aucun reponse du serveur (timeout)");
+                if (port_groupe_opt) *port_groupe_opt = -1;
+                if (group_name_opt) group_name_opt[0] = '\0';
+                return;
+            }
+        }
+
+        /* other recv errors are fatal */
         check_fatal(n < 0, "recvfrom serveur");
     }
     printf("[CLIENT] Received reply: %s\n", reply.texte);
