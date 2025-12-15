@@ -412,41 +412,64 @@ static void handle_command(ISYMessage *msg,
                 }
                 
                 /* Merge members of g1 into g2, avoiding duplicates by IP */
-                /* First read both files before deleting them */
+                /* Strategy: append members from g1 to g2 if their IP doesn't already exist in g2 */
                 typedef struct {
                     char username[MAX_USERNAME];
                     char ip[64];
                     char emoji[MAX_EMOJI];
                 } MergedMember;
                 
-                MergedMember merged[512];
-                int merged_count = 0;
+                MergedMember members_g2[512];
+                int count_g2 = 0;
                 
-                /* Read from g1 */
+                /* First, read all members from g2 (base group) */
+                {
+                    char filepath[256];
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
+                    FILE *f = fopen(filepath, "r");
+                    if (f) {
+                        char line[256];
+                        while (fgets(line, sizeof(line), f) && count_g2 < 512) {
+                            char username[MAX_USERNAME];
+                            char ip[64];
+                            char emoji[MAX_EMOJI];
+                            if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
+                                snprintf(members_g2[count_g2].username, MAX_USERNAME, "%s", username);
+                                snprintf(members_g2[count_g2].ip, 64, "%s", ip);
+                                snprintf(members_g2[count_g2].emoji, MAX_EMOJI, "%s", emoji);
+                                count_g2++;
+                            }
+                        }
+                        fclose(f);
+                    }
+                }
+                
+                /* Now read g1 and add members that don't already exist in g2 (by IP) */
                 {
                     char filepath[256];
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
                     FILE *f = fopen(filepath, "r");
                     if (f) {
                         char line[256];
-                        while (fgets(line, sizeof(line), f) && merged_count < 512) {
+                        while (fgets(line, sizeof(line), f) && count_g2 < 512) {
                             char username[MAX_USERNAME];
                             char ip[64];
                             char emoji[MAX_EMOJI];
                             if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
-                                /* Check if IP already exists */
-                                int found = 0;
-                                for (int i = 0; i < merged_count; ++i) {
-                                    if (strcmp(merged[i].ip, ip) == 0) {
-                                        found = 1;
+                                /* Check if this IP already exists in g2 */
+                                int ip_exists = 0;
+                                for (int i = 0; i < count_g2; ++i) {
+                                    if (strcmp(members_g2[i].ip, ip) == 0) {
+                                        ip_exists = 1;
                                         break;
                                     }
                                 }
-                                if (!found) {
-                                    snprintf(merged[merged_count].username, MAX_USERNAME, "%s", username);
-                                    snprintf(merged[merged_count].ip, 64, "%s", ip);
-                                    snprintf(merged[merged_count].emoji, MAX_EMOJI, "%s", emoji);
-                                    merged_count++;
+                                /* If IP not found in g2, add it */
+                                if (!ip_exists) {
+                                    snprintf(members_g2[count_g2].username, MAX_USERNAME, "%s", username);
+                                    snprintf(members_g2[count_g2].ip, 64, "%s", ip);
+                                    snprintf(members_g2[count_g2].emoji, MAX_EMOJI, "%s", emoji);
+                                    count_g2++;
                                 }
                             }
                         }
@@ -454,58 +477,24 @@ static void handle_command(ISYMessage *msg,
                     }
                 }
                 
-                /* Read from g2 */
-                {
-                    char filepath[256];
-                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
-                    FILE *f = fopen(filepath, "r");
-                    if (f) {
-                        char line[256];
-                        while (fgets(line, sizeof(line), f) && merged_count < 512) {
-                            char username[MAX_USERNAME];
-                            char ip[64];
-                            char emoji[MAX_EMOJI];
-                            if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
-                                /* Check if IP already exists */
-                                int found = 0;
-                                for (int i = 0; i < merged_count; ++i) {
-                                    if (strcmp(merged[i].ip, ip) == 0) {
-                                        found = 1;
-                                        break;
-                                    }
-                                }
-                                if (!found) {
-                                    snprintf(merged[merged_count].username, MAX_USERNAME, "%s", username);
-                                    snprintf(merged[merged_count].ip, 64, "%s", ip);
-                                    snprintf(merged[merged_count].emoji, MAX_EMOJI, "%s", emoji);
-                                    merged_count++;
-                                }
-                            }
-                        }
-                        fclose(f);
-                    }
-                }
-                
-                /* Delete both original files */
-                {
-                    char filepath[256];
-                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
-                    unlink(filepath);
-                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
-                    unlink(filepath);
-                }
-                
-                /* Write merged result to g2 */
+                /* Write updated g2 file with all members (g2 originals + new g1 members) */
                 {
                     char filepath[256];
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
                     FILE *f = fopen(filepath, "w");
                     if (f) {
-                        for (int i = 0; i < merged_count; ++i) {
-                            fprintf(f, "%s:%s:%s\n", merged[i].username, merged[i].ip, merged[i].emoji);
+                        for (int i = 0; i < count_g2; ++i) {
+                            fprintf(f, "%s:%s:%s\n", members_g2[i].username, members_g2[i].ip, members_g2[i].emoji);
                         }
                         fclose(f);
                     }
+                }
+                
+                /* Delete g1 file */
+                {
+                    char filepath[256];
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
+                    unlink(filepath);
                 }
                 
                 /* Notify g1 clients to migrate to g2 */
