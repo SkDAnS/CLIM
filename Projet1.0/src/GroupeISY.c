@@ -144,6 +144,58 @@ void handle_sigint(int sig)
     running = 0;
 }
 
+/* Load group members from the group file into memory (clients[] array)
+ * This is called at startup to preserve members from previous sessions or merges */
+static void load_group_file_into_memory(const char *group_name)
+{
+    ensure_infogroup_dir();
+    char filepath[256];
+    build_group_file_path(group_name, filepath, sizeof(filepath));
+    
+    FILE *f = fopen(filepath, "r");
+    if (!f) {
+        printf("[GROUP] No existing group file to load for %s\n", group_name);
+        return;
+    }
+    
+    printf("[GROUP] Loading members from %s...\n", filepath);
+    
+    int loaded = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f) && loaded < MAX_CLIENTS_GROUP) {
+        char username[MAX_USERNAME];
+        char ip[64];
+        char emoji[MAX_EMOJI];
+        
+        if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
+            /* Mark this IP as "connected" in memory, even though no real display port is active */
+            /* We'll use port 0 as a placeholder for persistent members */
+            struct sockaddr_in addr;
+            memset(&addr, 0, sizeof(addr));
+            addr.sin_family = AF_INET;
+            inet_pton(AF_INET, ip, &addr.sin_addr);
+            addr.sin_port = htons(0);  /* Placeholder: no active display port yet */
+            
+            /* Add this member - it will be marked as inactive in terms of display,
+             * but we track it to avoid losing it when someone reconnects */
+            for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+                if (!clients[i].actif) {
+                    clients[i].actif = 1;
+                    snprintf(clients[i].nom, MAX_USERNAME, "%s", username);
+                    clients[i].addr_cli = addr;
+                    snprintf(clients[i].emoji, MAX_EMOJI, "%s", emoji);
+                    printf("[GROUP]   Loaded: %s (%s) emoji=%s\n", username, ip, emoji);
+                    loaded++;
+                    break;
+                }
+            }
+        }
+    }
+    fclose(f);
+    printf("[GROUP] Loaded %d members from group file\n", loaded);
+}
+
+
 /* Add a client to the group and return status. Returns 0 if added, 1 if banned, 2 if no space */
 static int add_client(const char *name,
                        struct sockaddr_in *addr, int display_port,
@@ -160,6 +212,24 @@ static int add_client(const char *name,
         return 1;  /* Indicate ban */
     }
     
+    /* Check if this IP is already connected to the group */
+    for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
+        if (clients[i].actif) {
+            char existing_ip[64];
+            inet_ntop(AF_INET, &clients[i].addr_cli.sin_addr, existing_ip, sizeof(existing_ip));
+            if (strcmp(existing_ip, ip_str) == 0) {
+                printf("Client %s (%s) already connected to group %s, updating info\n",
+                       name, ip_str, g_group_name);
+                /* Update name and display port if they changed */
+                snprintf(clients[i].nom, MAX_USERNAME, "%s", name);
+                clients[i].addr_cli.sin_port = htons(display_port);
+                /* Emoji should remain consistent (based on IP) */
+                return 0;  /* Already connected, no new slot needed */
+            }
+        }
+    }
+    
+    /* Find a free slot for new client */
     for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
         if (!clients[i].actif) {
             clients[i].actif = 1;
@@ -248,6 +318,9 @@ int main(int argc, char *argv[])
     snprintf(g_group_name, sizeof(g_group_name), "%s", nom_groupe);
 
     memset(clients, 0, sizeof(clients));
+    
+    /* Load existing members from the group file (if it exists, e.g., after a merge) */
+    load_group_file_into_memory(nom_groupe);
 
     /* Attache SHM pour statistiques (optionnel) */
     key_t key = SHM_GROUP_KEY_BASE + (port - GROUP_PORT_BASE);
