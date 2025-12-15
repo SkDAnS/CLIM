@@ -49,6 +49,7 @@ void handle_sigint(int sig)
 {
     (void)sig;
     running = 0;
+    cleanup_infogroup_files();  /* Clean up all group info files */
     exit(0);
 }
 
