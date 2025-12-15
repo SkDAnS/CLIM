@@ -61,14 +61,7 @@ int main(int argc, char *argv[])
             break;
         }
 
-        /* DEBUG: print source and raw message for diagnostics */
-        {
-            char ip_src[64];
-            inet_ntop(AF_INET, &addr_src.sin_addr, ip_src, sizeof(ip_src));
-            printf("[DEBUG AFFICHAGE] recv from %s:%d ordre='%s' emetteur='%s' texte='%s' emoji='%s'\n",
-                   ip_src, ntohs(addr_src.sin_port), msg.ordre, msg.emetteur, msg.texte, msg.emoji);
-            fflush(stdout);
-        }
+
 
         if (strncmp(msg.ordre, ORDRE_MSG, 3) == 0) {
             printf("[%s] %s %s : %s\n",

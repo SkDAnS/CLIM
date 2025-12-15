@@ -1,6 +1,59 @@
 #include "../include/Commun.h"
 #include <strings.h>
 #include <fcntl.h>
+#include <sys/stat.h>
+
+/* Helper function to ensure infoGroup directory exists */
+static void ensure_infogroup_dir(void)
+{
+    mkdir("infoGroup", 0755);  /* Create if doesn't exist, ignore if already exists */
+}
+
+/* Helper function to build the path to the group info file */
+static void build_group_file_path(const char *group_name, char *path, size_t path_size)
+{
+    snprintf(path, path_size, "infoGroup/%s.txt", group_name);
+}
+
+/* Helper function to check if a user is already in the group file */
+static int is_user_already_in_file(const char *group_name, const char *username)
+{
+    ensure_infogroup_dir();
+    char filepath[256];
+    build_group_file_path(group_name, filepath, sizeof(filepath));
+    
+    FILE *f = fopen(filepath, "r");
+    if (!f) return 0;  /* File doesn't exist, so user is not in it */
+    
+    char line[256];
+    int found = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char stored_user[MAX_USERNAME];
+        if (sscanf(line, "%19s:", stored_user) == 1) {
+            if (strcmp(stored_user, username) == 0) {
+                found = 1;
+                break;
+            }
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+/* Add user info to the group file (name:ip:emoji) */
+static void add_user_to_group_file(const char *group_name, const char *username, 
+                                   const char *ip, const char *emoji)
+{
+    ensure_infogroup_dir();
+    char filepath[256];
+    build_group_file_path(group_name, filepath, sizeof(filepath));
+    
+    FILE *f = fopen(filepath, "a");
+    if (f) {
+        fprintf(f, "%s:%s:%s\n", username, ip, emoji);
+        fclose(f);
+    }
+}
 
 /* Liste des clients d'un groupe */
 typedef struct {
@@ -38,27 +91,14 @@ static void add_client(const char *name,
             printf("Client %s ajouté (port %d)\n",
                    name, display_port);
 
-            /* Append to group_members.txt to record that this user joined this group at least once. */
-            {
-                int already = 0;
-                FILE *fr = fopen("group_members.txt", "r");
-                if (fr) {
-                    char line[512];
-                    char want[256];
-                    snprintf(want, sizeof(want), "JOIN:%s:%s\n", g_group_name, name);
-                    while (fgets(line, sizeof(line), fr)) {
-                        if (strcmp(line, want) == 0) { already = 1; break; }
-                    }
-                    fclose(fr);
-                }
-                if (!already) {
-                    FILE *fa = fopen("group_members.txt", "a");
-                    if (fa) {
-                        fprintf(fa, "JOIN:%s:%s\n", g_group_name, name);
-                        fclose(fa);
-                    }
-                }
+            /* Extract IP address and add to group file (only if not already present) */
+            char ip_str[64];
+            inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
+            
+            if (!is_user_already_in_file(g_group_name, name)) {
+                add_user_to_group_file(g_group_name, name, ip_str, emoji);
             }
+            
             return;
         }
     }
@@ -181,16 +221,31 @@ int main(int argc, char *argv[])
                respond privately to the moderator's display with the member list. */
             if (strcasecmp(msg.texte, "list") == 0) {
                 if (strcmp(msg.emetteur, moderateur) == 0) {
-                    /* build list */
+                    /* Read list from file */
                     char buf[MAX_TEXT]; buf[0] = '\0';
-                    int first = 1;
-                    for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
-                        if (!clients[i].actif) continue;
-                        if (!first) {
-                            strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
+                    char filepath[256];
+                    build_group_file_path(nom_groupe, filepath, sizeof(filepath));
+                    
+                    FILE *f = fopen(filepath, "r");
+                    if (f) {
+                        char line[256];
+                        int first = 1;
+                        while (fgets(line, sizeof(line), f)) {
+                            char username[MAX_USERNAME];
+                            char ip_str[64];
+                            char emoji[MAX_EMOJI];
+                            if (sscanf(line, "%19[^:]:%63[^:]:%s", username, ip_str, emoji) == 3) {
+                                if (!first) {
+                                    strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
+                                }
+                                char member_line[128];
+                                snprintf(member_line, sizeof(member_line), "%s %s (%s)", 
+                                        emoji, username, ip_str);
+                                strncat(buf, member_line, sizeof(buf) - strlen(buf) - 1);
+                                first = 0;
+                            }
                         }
-                        strncat(buf, clients[i].nom, sizeof(buf) - strlen(buf) - 1);
-                        first = 0;
+                        fclose(f);
                     }
                     if (buf[0] == '\0') snprintf(buf, sizeof(buf), "Aucun membre\n");
 

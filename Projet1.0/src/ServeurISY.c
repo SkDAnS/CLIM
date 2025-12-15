@@ -1,5 +1,6 @@
 //test
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
 #include "../include/Commun.h"
 #include <signal.h>
 #include <unistd.h>
@@ -7,6 +8,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <fcntl.h>
+#include <dirent.h>
 /* Use nanosleep instead of usleep for portability */
 static void msleep_ms(long ms) {
     struct timespec ts;
@@ -25,12 +27,29 @@ static int running = 1;
 //les deux prochains pour la recherche du serveur sur le réseaux 
 /* Broadcast discovery removed - code cleaned up / disabled */
 
+/* Helper function to clean up all group info files */
+static void cleanup_infogroup_files(void)
+{
+    DIR *dir = opendir("infoGroup");
+    if (!dir) return;  /* Directory doesn't exist */
+    
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_REG) {  /* Regular file */
+            char filepath[256];
+            snprintf(filepath, sizeof(filepath), "infoGroup/%s", entry->d_name);
+            unlink(filepath);  /* Delete the file */
+        }
+    }
+    closedir(dir);
+}
 
 /* Nettoyage sur CTRL-C */
 void handle_sigint(int sig)
 {
     (void)sig;
     running = 0;
+    exit(0);
 }
 
 /* Cherche un groupe par nom, renvoie son index ou -1 */
@@ -316,6 +335,12 @@ static void handle_command(ISYMessage *msg,
                                 if (groupes[idx1].shm_id > 0) { shmctl(groupes[idx1].shm_id, IPC_RMID, NULL); groupes[idx1].shm_id = 0; }
                                 groupes[idx1].shm_key = 0;
                                 groupes[idx1].actif = 0;
+                                /* Clean up the group info file */
+                                {
+                                    char filepath[256];
+                                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
+                                    unlink(filepath);
+                                }
                             }
                             if (groupes[idx2].pid > 0 && idx2 != target_idx) {
                                 pid_t pid2 = groupes[idx2].pid;
@@ -327,6 +352,12 @@ static void handle_command(ISYMessage *msg,
                                 if (groupes[idx2].shm_id > 0) { shmctl(groupes[idx2].shm_id, IPC_RMID, NULL); groupes[idx2].shm_id = 0; }
                                 groupes[idx2].shm_key = 0;
                                 groupes[idx2].actif = 0;
+                                /* Clean up the group info file */
+                                {
+                                    char filepath[256];
+                                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
+                                    unlink(filepath);
+                                }
                             }
 
                                 snprintf(reply.texte, MAX_TEXT, "Groupes %s + %s fusionnes en %s (port %d)", g1, g2, groupes[target_idx].nom, groupes[target_idx].port_groupe);
@@ -388,6 +419,12 @@ static void handle_command(ISYMessage *msg,
                                 if (groupes[idx1].shm_id > 0) shmctl(groupes[idx1].shm_id, IPC_RMID, NULL);
                                 groupes[idx1].shm_id = 0;
                                 groupes[idx1].shm_key = 0;
+                                /* Clean up the group info file */
+                                {
+                                    char filepath[256];
+                                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
+                                    unlink(filepath);
+                                }
                             }
                             if (groupes[idx2].pid > 0) {
                                 pid_t pid2 = groupes[idx2].pid;
@@ -399,6 +436,12 @@ static void handle_command(ISYMessage *msg,
                                 if (groupes[idx2].shm_id > 0) shmctl(groupes[idx2].shm_id, IPC_RMID, NULL);
                                 groupes[idx2].shm_id = 0;
                                 groupes[idx2].shm_key = 0;
+                                /* Clean up the group info file */
+                                {
+                                    char filepath[256];
+                                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
+                                    unlink(filepath);
+                                }
                             }
 
                             snprintf(reply.texte, MAX_TEXT,
@@ -430,6 +473,12 @@ static void handle_command(ISYMessage *msg,
                     shmctl(groupes[idx].shm_id, IPC_RMID, NULL);
                     groupes[idx].shm_id = 0;
                     groupes[idx].shm_key = 0;
+                }
+                /* Clean up the group info file */
+                {
+                    char filepath[256];
+                    snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", arg1);
+                    unlink(filepath);  /* Delete the file, ignore errors */
                 }
         }
     }
@@ -506,6 +555,7 @@ int main(void)
     }
 
     close(sock_srv);
+    cleanup_infogroup_files();  /* Clean up all group info files before shutting down */
     printf("ServeurISY termine\n");
     return 0;
 }
