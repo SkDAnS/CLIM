@@ -12,7 +12,6 @@
 - [Structure des données](#structure-des-données)
 - [Fonctionnalités](#fonctionnalités)
 - [Gestion de la persistence](#gestion-de-la-persistence)
-- [Détails techniques](#détails-techniques)
 
 ##  Architecture
 
