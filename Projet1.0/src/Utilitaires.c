@@ -1,8 +1,3 @@
-/*
- * Utilitaires.c
- * Fonctions utilitaires communes - Version corrigée
- */
-
 #include "../include/Commun.h"
 
 /* Avatar ASCII basé sur l'IP (derniers chiffres) */
@@ -30,7 +25,7 @@ int creer_socket_udp() {
         return -1;
     }
     
-    // Option pour réutiliser l'adresse (utile en cas de redémarrage rapide)
+    // Option pour réutiliser l'adresse
     int opt = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         perror("setsockopt SO_REUSEADDR");
@@ -39,12 +34,11 @@ int creer_socket_udp() {
     return sockfd;
 }
 
-/* Bind un socket à un port - MODIFIÉ pour écouter sur 0.0.0.0 */
 int bind_socket(int sockfd, int port) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0 - Écoute sur TOUTES les interfaces
+    addr.sin_addr.s_addr = INADDR_ANY; 
     addr.sin_port = htons(port);
     
     if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -128,7 +122,7 @@ void nettoyer_chaine(char* chaine) {
     }
 }
 
-/* Jouer une notification sonore (bell) */
+/* Jouer une notification sonore */
 void jouer_son_notification() {
     printf("\a");
     fflush(stdout);

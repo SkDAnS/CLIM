@@ -3,13 +3,11 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-/* Helper function to ensure infoGroup directory exists */
 static void ensure_infogroup_dir(void)
 {
-    mkdir("infoGroup", 0755);  /* Create if doesn't exist, ignore if already exists */
+    mkdir("infoGroup", 0755);  
 }
 
-/* Helper function to build the path to the group info file */
 static void build_group_file_path(const char *group_name, char *path, size_t path_size)
 {
     snprintf(path, path_size, "infoGroup/%s.txt", group_name);
@@ -18,25 +16,22 @@ static void build_group_file_path(const char *group_name, char *path, size_t pat
 
 
 
-/* Build path to the banned IPs file for a group */
 static void build_banned_file_path(const char *group_name, char *path, size_t path_size)
 {
     snprintf(path, path_size, "infoGroup/%s_banned.txt", group_name);
 }
 
-/* Check if an IP is banned from a group */
 static int is_ip_banned(const char *group_name, const char *ip)
 {
     char filepath[256];
     build_banned_file_path(group_name, filepath, sizeof(filepath));
     
     FILE *f = fopen(filepath, "r");
-    if (!f) return 0;  /* No ban file means no bans */
+    if (!f) return 0; 
     
     char line[64];
     int found = 0;
     while (fgets(line, sizeof(line), f)) {
-        /* Remove newline if present */
         char *p = strchr(line, '\n');
         if (p) *p = '\0';
         if (strcmp(line, ip) == 0) {
@@ -48,7 +43,6 @@ static int is_ip_banned(const char *group_name, const char *ip)
     return found;
 }
 
-/* Add an IP to the banned list of a group */
 static void ban_ip_from_group(const char *group_name, const char *ip)
 {
     ensure_infogroup_dir();
@@ -65,29 +59,26 @@ static void ban_ip_from_group(const char *group_name, const char *ip)
 /* Liste des clients d'un groupe */
 typedef struct {
     int actif;
-    struct sockaddr_in addr_cli;  /* IP + port d'affichage côté client */
+    struct sockaddr_in addr_cli;  
     char nom[MAX_USERNAME];
-    char emoji[MAX_EMOJI];        /* emoji assigné au client */
+    char emoji[MAX_EMOJI];       
 } ClientInfo;
 
 static ClientInfo clients[MAX_CLIENTS_GROUP];
 static int sock_grp;
 static int running = 1;
 static GroupStats *stats = NULL;
-/* current group name stored for use in helper functions */
 static char g_group_name[MAX_GROUP_NAME];
 
-/* Rebuild the group file from current active clients */
 static void rebuild_group_file(const char *group_name)
 {
     ensure_infogroup_dir();
     char filepath[256];
     build_group_file_path(group_name, filepath, sizeof(filepath));
     
-    /* Delete old file */
     unlink(filepath);
     
-    /* Recreate with current active clients */
+   
     FILE *f = fopen(filepath, "w");
     if (f) {
         for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
@@ -107,8 +98,6 @@ void handle_sigint(int sig)
     running = 0;
 }
 
-/* Load group members from the group file into memory (clients[] array)
- * This is called at startup to preserve members from previous sessions or merges */
 static void load_group_file_into_memory(const char *group_name)
 {
     ensure_infogroup_dir();
@@ -131,16 +120,14 @@ static void load_group_file_into_memory(const char *group_name)
         char emoji[MAX_EMOJI];
         
         if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
-            /* Mark this IP as "connected" in memory, even though no real display port is active */
-            /* We'll use port 0 as a placeholder for persistent members */
+           
             struct sockaddr_in addr;
             memset(&addr, 0, sizeof(addr));
             addr.sin_family = AF_INET;
             inet_pton(AF_INET, ip, &addr.sin_addr);
-            addr.sin_port = htons(0);  /* Placeholder: no active display port yet */
+            addr.sin_port = htons(0);  
             
-            /* Add this member - it will be marked as inactive in terms of display,
-             * but we track it to avoid losing it when someone reconnects */
+           
             for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
                 if (!clients[i].actif) {
                     clients[i].actif = 1;
@@ -159,22 +146,18 @@ static void load_group_file_into_memory(const char *group_name)
 }
 
 
-/* Add a client to the group and return status. Returns 0 if added, 1 if banned, 2 if no space */
 static int add_client(const char *name,
                        struct sockaddr_in *addr, int display_port)
 {
-    /* Extract IP address first to check if banned */
     char ip_str[64];
     inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
     
-    /* Check if this IP is banned from the group */
     if (is_ip_banned(g_group_name, ip_str)) {
         printf("Client %s (%s) rejected: IP is banned from group %s\n", 
                name, ip_str, g_group_name);
-        return 1;  /* Indicate ban */
+        return 1;  
     }
     
-    /* Check if this IP is already connected to the group */
     for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
         if (clients[i].actif) {
             char existing_ip[64];
@@ -182,16 +165,13 @@ static int add_client(const char *name,
             if (strcmp(existing_ip, ip_str) == 0) {
                 printf("Client %s (%s) already connected to group %s, updating info\n",
                        name, ip_str, g_group_name);
-                /* Update name and display port if they changed */
                 snprintf(clients[i].nom, MAX_USERNAME, "%s", name);
                 clients[i].addr_cli.sin_port = htons(display_port);
-                /* Emoji should remain consistent (based on IP) */
-                return 0;  /* Already connected, no new slot needed */
+                return 0; 
             }
         }
     }
     
-    /* Find a free slot for new client */
     for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
         if (!clients[i].actif) {
             clients[i].actif = 1;
@@ -199,7 +179,6 @@ static int add_client(const char *name,
             clients[i].addr_cli = *addr;
             clients[i].addr_cli.sin_port = htons(display_port);
             
-            /* Assign emoji based on IP address, not username */
             char emoji_from_ip[MAX_EMOJI];
             choose_emoji_from_ip(ip_str, emoji_from_ip);
             snprintf(clients[i].emoji, MAX_EMOJI, "%s", emoji_from_ip);
@@ -208,30 +187,26 @@ static int add_client(const char *name,
             printf("Client %s ajouté (port %d, IP: %s, emoji: %s)\n",
                    name, display_port, ip_str, emoji_from_ip);
 
-            /* Rebuild the group file with all current clients */
             rebuild_group_file(g_group_name);
             
-            return 0;  /* Success */
+            return 0;  
         }
     }
     printf("Plus de place pour de nouveaux clients dans ce groupe\n");
-    return 2;  /* No space */
+    return 2;  
 }
 
-/* Add a client by explicit IP and port (used to transfer clients from another group) */
 static void add_client_direct(const char *name, const char *ip, int display_port, const char *emoji)
 {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     inet_pton(AF_INET, ip, &addr.sin_addr);
-    /* Avoid duplicates: check if client with same IP:port already exists */
     for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
         if (clients[i].actif) {
             char existing_ip[64];
             inet_ntop(AF_INET, &clients[i].addr_cli.sin_addr, existing_ip, sizeof(existing_ip));
             if (strcmp(existing_ip, ip) == 0 && ntohs(clients[i].addr_cli.sin_port) == display_port) {
-                /* Update name/emoji if needed */
                 snprintf(clients[i].nom, MAX_USERNAME, "%s", name);
                 snprintf(clients[i].emoji, MAX_EMOJI, "%s", emoji);
                 return;
@@ -243,7 +218,6 @@ static void add_client_direct(const char *name, const char *ip, int display_port
 
 static void broadcast_message(ISYMessage *msg)
 {
-    /* Before broadcasting, find the client and recalculate emoji based on IP */
     for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
         if (clients[i].actif && strcmp(clients[i].nom, msg->emetteur) == 0) {
             char ip_str[64];
@@ -253,7 +227,6 @@ static void broadcast_message(ISYMessage *msg)
         }
     }
     
-    /* Broadcast to all active clients */
     for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
         if (clients[i].actif) {
             sendto(sock_grp, msg, sizeof(*msg), 0,
@@ -276,15 +249,12 @@ int main(int argc, char *argv[])
     const char *moderateur = argv[2];
     int port = atoi(argv[3]);
 
-    /* store group name globally for helpers that need it */
     snprintf(g_group_name, sizeof(g_group_name), "%s", nom_groupe);
 
     memset(clients, 0, sizeof(clients));
     
-    /* Load existing members from the group file (if it exists, e.g., after a merge) */
     load_group_file_into_memory(nom_groupe);
 
-    /* Attache SHM pour statistiques (optionnel) */
     key_t key = SHM_GROUP_KEY_BASE + (port - GROUP_PORT_BASE);
     int shm_id = shmget(key, sizeof(GroupStats), 0666);
     if (shm_id >= 0) {
@@ -301,7 +271,6 @@ int main(int argc, char *argv[])
     signal(SIGTERM, handle_sigint);
 
     sock_grp = create_udp_socket();
-    /* Avoid child processes inheriting this socket */
     int flags_grp = fcntl(sock_grp, F_GETFD);
     if (flags_grp != -1) fcntl(sock_grp, F_SETFD, flags_grp | FD_CLOEXEC);
     struct sockaddr_in addr_grp, addr_src;
@@ -325,8 +294,7 @@ int main(int argc, char *argv[])
             break;
         }
 
-        /* DEBUG: afficher l'origine du paquet reçu pour diagnostiquer doublons */
-        addrlen = sizeof(addr_src);               /* assure addrlen correct */
+        addrlen = sizeof(addr_src);              
         {
             char ip_src[64];
             inet_ntop(AF_INET, &addr_src.sin_addr, ip_src, sizeof(ip_src));
@@ -340,7 +308,6 @@ int main(int argc, char *argv[])
             int display_port = atoi(msg.texte);
             int status = add_client(msg.emetteur, &addr_src, display_port);
             
-            /* If client was banned, send an error message */
             if (status == 1) {
                 ISYMessage error_msg;
                 memset(&error_msg, 0, sizeof(error_msg));
@@ -351,7 +318,6 @@ int main(int argc, char *argv[])
                 error_msg.groupe[MAX_GROUP_NAME - 1] = '\0';
                 snprintf(error_msg.texte, sizeof(error_msg.texte), "VOUS_ETES_BANNI");
                 
-                /* Send error message to the banned client's display port */
                 struct sockaddr_in addr_display;
                 memcpy(&addr_display, &addr_src, sizeof(addr_src));
                 addr_display.sin_port = htons(display_port);
@@ -364,12 +330,10 @@ int main(int argc, char *argv[])
             if (stats) stats->nb_messages++;
             snprintf(msg.groupe, MAX_GROUP_NAME, "%s", nom_groupe);
 
-            /* If moderator requests list of members by sending "list" in chat,
-               respond privately to the moderator's display with the member list. */
+           
             if (strcasecmp(msg.texte, "list") == 0) {
                 if (strcmp(msg.emetteur, moderateur) == 0) {
-                    /* Read list from file */
-                    char buf[2048]; buf[0] = '\0';  /* Increased buffer size to avoid truncation warnings */
+                    char buf[2048]; buf[0] = '\0'; 
                     char filepath[256];
                     build_group_file_path(nom_groupe, filepath, sizeof(filepath));
                     
@@ -414,7 +378,6 @@ int main(int argc, char *argv[])
                     resp.groupe[MAX_GROUP_NAME - 1] = '\0';
                     snprintf(resp.texte, sizeof(resp.texte), "%s", buf);
 
-                    /* find moderator's display address in clients[] */
                     int found = 0;
                     struct sockaddr_in target;
                     memset(&target, 0, sizeof(target));
@@ -426,13 +389,11 @@ int main(int argc, char *argv[])
                         }
                     }
                     if (!found) {
-                        /* fallback: reply to sender address (addr_src) */
                         target = addr_src;
                     }
                     ssize_t s = sendto(sock_grp, &resp, sizeof(resp), 0, (struct sockaddr *)&target, sizeof(target));
                     if (s < 0) perror("sendto list reply");
                 } else {
-                    /* notify sender that only moderator can list */
                     ISYMessage deny;
                     memset(&deny,0,sizeof(deny));
                     strcpy(deny.ordre, ORDRE_MSG);
@@ -444,11 +405,9 @@ int main(int argc, char *argv[])
                     if (s < 0) perror("sendto deny");
                 }
             } else if (strncmp(msg.texte, "ban ", 4) == 0) {
-                /* Ban command: "ban <ip>" - only moderator can use this */
                 if (strcmp(msg.emetteur, moderateur) == 0) {
                     char ban_ip[64] = {0};
                     if (sscanf(msg.texte, "ban %63s", ban_ip) == 1) {
-                        /* Find and disconnect the client with this IP */
                         int found_client = -1;
                         for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
                             if (clients[i].actif) {
@@ -462,16 +421,13 @@ int main(int argc, char *argv[])
                         }
                         
                         if (found_client != -1) {
-                            /* Ban the IP from the group */
                             ban_ip_from_group(nom_groupe, ban_ip);
                             
-                            /* Remove the client from active clients */
                             char banned_username[MAX_USERNAME];
                             snprintf(banned_username, sizeof(banned_username), "%s", clients[found_client].nom);
                             clients[found_client].actif = 0;
                             if (stats) stats->nb_clients--;
                             
-                            /* Send ban message directly to the banned client to force them out */
                             ISYMessage ban_msg;
                             memset(&ban_msg, 0, sizeof(ban_msg));
                             strcpy(ban_msg.ordre, ORDRE_MSG);
@@ -490,7 +446,6 @@ int main(int argc, char *argv[])
                                                (struct sockaddr *)&addr_banned, sizeof(addr_banned));
                             if (s < 0) perror("sendto force ban message");
                             
-                            /* Notify all clients that someone was banned */
                             ISYMessage ban_notice;
                             memset(&ban_notice, 0, sizeof(ban_notice));
                             strcpy(ban_notice.ordre, ORDRE_MSG);
@@ -502,13 +457,11 @@ int main(int argc, char *argv[])
                                     banned_username, ban_ip);
                             broadcast_message(&ban_notice);
                             
-                            /* Rebuild the group file with remaining clients */
                             rebuild_group_file(nom_groupe);
                             
                             printf("Client %s (%s) a ete banni du groupe %s\n", 
                                    banned_username, ban_ip, nom_groupe);
                         } else {
-                            /* IP not found in current clients */
                             ISYMessage error;
                             memset(&error, 0, sizeof(error));
                             strcpy(error.ordre, ORDRE_MSG);
@@ -520,7 +473,6 @@ int main(int argc, char *argv[])
                         }
                     }
                 } else {
-                    /* Only moderator can ban */
                     ISYMessage deny;
                     memset(&deny, 0, sizeof(deny));
                     strcpy(deny.ordre, ORDRE_MSG);
@@ -535,7 +487,6 @@ int main(int argc, char *argv[])
             }
         }
         else if (strncmp(msg.ordre, ORDRE_MGR, 3) == 0) {
-            /* ex: MGR text = "MIGRATE newname newport" */
             /* On convertit pour informer les clients et leur montrer où se connecter */
             ISYMessage notice;
             memset(&notice, 0, sizeof(notice));
@@ -545,24 +496,20 @@ int main(int argc, char *argv[])
             choose_emoji_from_username("SERVER", notice.emoji);
             strncpy(notice.groupe, nom_groupe, MAX_GROUP_NAME - 1);
             notice.groupe[MAX_GROUP_NAME - 1] = '\0';
-            /* Parse MIGRATE <newname> <newport> */
             char newname[MAX_GROUP_NAME] = {0};
             int newport = -1;
             if (sscanf(msg.texte, "MIGRATE %31s %d", newname, &newport) == 2) {
                 snprintf(notice.texte, sizeof(notice.texte), "Groupe fusionné → %s (port %d)", newname, newport);
-                /* Also send a machine-parsable MIGRATE message so clients (Affichage) can auto-join */
                 ISYMessage control;
                 memset(&control, 0, sizeof(control));
                 strcpy(control.ordre, ORDRE_MSG);
                 strncpy(control.emetteur, "SERVER", MAX_USERNAME - 1);
                 control.emetteur[MAX_USERNAME - 1] = '\0';
-                /* Use snprintf instead of strncpy to ensure null-termination and avoid warnings */
                 snprintf(control.emoji, MAX_EMOJI, "%s", notice.emoji);
                 snprintf(control.texte, sizeof(control.texte), "MIGRATE %s %d", newname, newport);
                 broadcast_message(&control);
             }
             else if (sscanf(msg.texte, "MIGRATEEXIST %31s %d", newname, &newport) == 2) {
-                /* send ADDCLIENT for each local client entry to the target group's port */
                 struct sockaddr_in addr_target;
                 fill_sockaddr(&addr_target, "127.0.0.1", newport);
                 for (int i = 0; i < MAX_CLIENTS_GROUP; ++i) {
@@ -579,8 +526,6 @@ int main(int argc, char *argv[])
                     ssize_t r = sendto(sock_grp, &addmsg, sizeof(addmsg), 0, (struct sockaddr *)&addr_target, sizeof(addr_target));
                     if (r < 0) perror("sendto ADDCLIENT");
                 }
-                /* Also notify local clients */
-                /* build notice text safely */
                 {
                     const char prefix[] = "Groupe fusionné → ";
                     size_t avail = sizeof(notice.texte) - 1;
@@ -593,29 +538,24 @@ int main(int argc, char *argv[])
                         strncat(notice.texte, buf, avail - used);
                     }
                 }
-                /* also broadcast the control MIGRATE message for clients to auto-join */
                 ISYMessage control;
                 memset(&control, 0, sizeof(control));
                 strcpy(control.ordre, ORDRE_MSG);
                 strncpy(control.emetteur, "SERVER", MAX_USERNAME - 1);
                 control.emetteur[MAX_USERNAME - 1] = '\0';
-                /* Use snprintf to copy emoji and ensure null-termination */
                 snprintf(control.emoji, MAX_EMOJI, "%s", notice.emoji);
                 snprintf(control.texte, sizeof(control.texte), "MIGRATE %s %d", newname, newport);
                 broadcast_message(&control);
             }
             else if (strncmp(msg.texte, "ADDCLIENT", 9) == 0) {
-                /* ADDCLIENT name ip port */
                 char name[MAX_USERNAME] = {0};
                 char ipstr[64] = {0};
                 int port = 0;
                 if (sscanf(msg.texte, "ADDCLIENT %19s %63s %d", name, ipstr, &port) >= 3) {
                     add_client_direct(name, ipstr, port, msg.emoji);
                 }
-                /* Do not broadcast add notice to local clients, continue to next message */
                 continue;
             } else {
-                /* build notice text safely */
                 {
                     const char prefix[] = "Groupe fusionné → ";
                     size_t avail = sizeof(notice.texte) - 1;
@@ -623,7 +563,6 @@ int main(int argc, char *argv[])
                     notice.texte[avail] = '\0';
                     size_t used = strlen(notice.texte);
                     if (used < avail) {
-                        /* Append at most remaining space using snprintf to avoid warnings */
                         snprintf(notice.texte + used, avail - used + 1, "%.*s", (int)(avail - used), msg.texte);
                     }
                 }

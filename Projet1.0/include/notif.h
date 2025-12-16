@@ -12,7 +12,7 @@
 /* Liste les fichiers .wav du dossier 'sons' */
 int listerSons(char nomsSons[][MAX_NOM]);
 
-/* Joue un son de notification (lance aplay sur Linux, start sur Windows) */
+/* Joue un son de notification */
 void jouerSon(const char *nomFichier);
 
-#endif /* NOTIF_H */
+#endif 

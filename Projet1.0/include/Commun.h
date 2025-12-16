@@ -21,33 +21,33 @@
 
 /* Paramètres généraux */
 
-#define SERVER_PORT       8000        /* Port du ServeurISY */
-#define GROUP_PORT_BASE   8100        /* Port de base des groupes */
+#define SERVER_PORT       8000       
+#define GROUP_PORT_BASE   8100        
 #define MAX_GROUPS        10
 #define MAX_GROUP_NAME    32
 #define MAX_USERNAME      20
 #define MAX_TEXT          100
 #define MAX_CLIENTS_GROUP 16
-#define MAX_EMOJI         8           /* Taille du champ emoji (UTF-8) */
+#define MAX_EMOJI         8           
 
-#define SHM_CLIENT_KEY    0x1234      /* SHM ClientISY <-> AffichageISY */
-#define SHM_GROUP_KEY_BASE 0x2000     /* SHM ServeurISY <-> GroupeISY (optionnel) */
+#define SHM_CLIENT_KEY    0x1234     
+#define SHM_GROUP_KEY_BASE 0x2000     
 
 /* Ordres possible dans les messages réseau */
-#define ORDRE_CMD "CMD"   /* Commande envoyée au serveur */
-#define ORDRE_RPL "RPL"   /* Réponse serveur */
-#define ORDRE_CON "CON"   /* Connexion à un groupe (auprès de GroupeISY) */
-#define ORDRE_MSG "MES"   /* Message normal d’un utilisateur */
+#define ORDRE_CMD "CMD"   
+#define ORDRE_RPL "RPL"   
+#define ORDRE_CON "CON"   
+#define ORDRE_MSG "MES"   
 /* Ordre de gestion envoyé par le serveur au groupe (ex: MIGRATE) */
 #define ORDRE_MGR "MGR"
 
 /* Structure de message réseau (énoncé) */
 typedef struct {
-    char ordre[4];                 /* "CMD", "MES", ... (3 + '\0') */
-    char emetteur[MAX_USERNAME];   /* Nom utilisateur */
-    char emoji[MAX_EMOJI];         /* Emoji Unicode (UTF-8) */
-    char groupe[MAX_GROUP_NAME];   /* Nom du groupe si besoin */
-    char texte[MAX_TEXT];          /* Commande ou contenu du message */
+    char ordre[4];                 
+    char emetteur[MAX_USERNAME];  
+    char emoji[MAX_EMOJI];         
+    char groupe[MAX_GROUP_NAME];   
+    char texte[MAX_TEXT];         
 } ISYMessage;
 
 /* Description d’un groupe côté serveur */
@@ -55,22 +55,20 @@ typedef struct {
     int  actif;
     char nom[MAX_GROUP_NAME];
     char moderateur[MAX_USERNAME];
-    int  port_groupe;              /* port UDP du GroupeISY */
-    key_t shm_key;                 /* pour SHM groupe (statistiques, optionnel) */
+    int  port_groupe;              
+    key_t shm_key;                 
     int   shm_id;
-    pid_t pid;                     /* pid du processus GroupeISY */
+    pid_t pid;                     
 } GroupeInfo;
 
-/* SHM ClientISY <-> AffichageISY
- * Minimal : seulement un flag pour demander l'arrêt de l'affichage. */
+
 typedef struct {
-    int running;                   /* 1 = continuer, 0 = arrêter */
-    char notify[MAX_TEXT];         /* message pour inviter a migrer */
-    int  notify_flag;              /* 1 = nouvelle notification */
-    char sound_name[256];          /* nom du fichier son pour notifications */
+    int running;                   
+    char notify[MAX_TEXT];         
+    int  notify_flag;             
+    char sound_name[256];          
 } ClientDisplayShm;
 
-/* SHM ServeurISY <-> GroupeISY (ex : statistiques) – optionnel */
 typedef struct {
     int nb_messages;
     int nb_clients;
@@ -111,7 +109,7 @@ static inline void fill_sockaddr(struct sockaddr_in *addr,
 static inline void choose_emoji_from_username(const char *username, char *emoji_buf)
 {
     if (!username || username[0] == '\0') {
-        strcpy(emoji_buf, "😀");  /* Default: U+1F600 */
+        strcpy(emoji_buf, "😀");  
         return;
     }
 
@@ -156,7 +154,7 @@ static inline void choose_emoji_from_username(const char *username, char *emoji_
 static inline void choose_emoji_from_ip(const char *ip_str, char *emoji_buf)
 {
     if (!ip_str || ip_str[0] == '\0') {
-        strcpy(emoji_buf, "😀");  /* Default: U+1F600 */
+        strcpy(emoji_buf, "😀");  
         return;
     }
 
@@ -197,4 +195,4 @@ static inline void choose_emoji_from_ip(const char *ip_str, char *emoji_buf)
     }
 }
 
-#endif /* COMMUN_H */
+#endif 

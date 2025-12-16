@@ -1,4 +1,4 @@
-//test
+//pomme
 #define _POSIX_C_SOURCE 200809L
 #define _DEFAULT_SOURCE
 #include "../include/Commun.h"
@@ -9,36 +9,31 @@
 #include <time.h>
 #include <fcntl.h>
 #include <dirent.h>
-/* Use nanosleep instead of usleep for portability */
 static void msleep_ms(long ms) {
     struct timespec ts;
     ts.tv_sec = ms/1000;
     ts.tv_nsec = (ms%1000) * 1000000L;
     nanosleep(&ts, NULL);
 }
-/* Some toolchains (or non-POSIX targets) may not declare kill; declare it explicitly
- * to avoid implicit declaration warnings on all environments. The prototype uses
- * pid_t which is available through <sys/types.h>. */
+
 extern int kill(pid_t pid, int sig);
 
 static int sock_srv;
 static GroupeInfo groupes[MAX_GROUPS];
 static int running = 1;
-//les deux prochains pour la recherche du serveur sur le réseaux 
-/* Broadcast discovery removed - code cleaned up / disabled */
 
-/* Helper function to clean up all group info files */
+
 static void cleanup_infogroup_files(void)
 {
     DIR *dir = opendir("infoGroup");
-    if (!dir) return;  /* Directory doesn't exist */
+    if (!dir) return; 
     
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_REG) {  /* Regular file */
-            char filepath[512];  /* Increased buffer size to avoid truncation */
+        if (entry->d_type == DT_REG) {  
+            char filepath[512]; 
             snprintf(filepath, sizeof(filepath), "infoGroup/%s", entry->d_name);
-            unlink(filepath);  /* Delete the file (both group info and banned files) */
+            unlink(filepath);  
         }
     }
     closedir(dir);
@@ -49,7 +44,7 @@ void handle_sigint(int sig)
 {
     (void)sig;
     running = 0;
-    cleanup_infogroup_files();  /* Clean up all group info files */
+    cleanup_infogroup_files();  
     exit(0);
 }
 
@@ -84,12 +79,10 @@ static int create_group_process(int index)
         _exit(EXIT_FAILURE);
     }
 
-    /* Père : continue - enregistrer PID pour gestion ultérieure (merge/stop) */
     groupes[index].pid = pid;
     return 0;
 }
 
-/* Traite une commande CMD reçue du client */
 static void handle_command(ISYMessage *msg,
                            struct sockaddr_in *src, socklen_t src_len)
 {
@@ -149,7 +142,6 @@ static void handle_command(ISYMessage *msg,
                 snprintf(groupes[slot].moderateur, MAX_USERNAME, "%.*s", (int)(MAX_USERNAME - 1), msg->emetteur);
                 groupes[slot].port_groupe = GROUP_PORT_BASE + slot;
 
-                /* Optionnel : SHM stats */
                 key_t key = SHM_GROUP_KEY_BASE + slot;
                 int shm_id = shmget(key, sizeof(GroupStats),
                                     IPC_CREAT | 0666);
@@ -158,7 +150,6 @@ static void handle_command(ISYMessage *msg,
                 groupes[slot].shm_id  = shm_id;
 
                     create_group_process(slot);
-                            /* Append new group to group_members.txt (avoid duplicates) */
                             {
                                 FILE *f = fopen("group_members.txt", "r");
                                 int seen = 0;
@@ -181,16 +172,14 @@ static void handle_command(ISYMessage *msg,
                                     }
                                 }
                             }
-                /* Give child a moment to start and fail if exec failed */
-                msleep_ms(100); /* 100ms */
+                msleep_ms(100); 
                 if (groupes[slot].pid > 0) {
                     int status;
                     pid_t r = waitpid(groupes[slot].pid, &status, WNOHANG);
                     if (r == groupes[slot].pid) {
-                        /* Child terminated immediately -> creation failed */
                             strncpy(reply.texte, "Erreur: echec demarrage GroupeISY", MAX_TEXT - 1);
                             reply.texte[MAX_TEXT - 1] = '\0';
-                        /* cleanup */
+                        
                         groupes[slot].actif = 0;
                         if (groupes[slot].shm_id > 0) { shmctl(groupes[slot].shm_id, IPC_RMID, NULL); groupes[slot].shm_id = 0; }
                         groupes[slot].shm_key = 0;
@@ -205,7 +194,6 @@ static void handle_command(ISYMessage *msg,
                          groupes[slot].nom,
                          groupes[slot].port_groupe);
 
-                /* Append group name to group_members.txt (avoid duplicates) */
                 {
                     FILE *f = fopen("group_members.txt", "r");
                     int seen = 0;
@@ -244,20 +232,17 @@ static void handle_command(ISYMessage *msg,
         }
     }
     else if (strcmp(cmd, "CHECKBAN") == 0) {
-        /* Check if the client's IP (from source) is banned from a group */
-        /* Expected format: CHECKBAN <group_name> */
+        
         char group_name[64] = {0};
         sscanf(msg->texte, "%15s %63s", cmd, group_name);
         
         if (group_name[0] == '\0') {
             strcpy(reply.texte, "Usage: CHECKBAN <group_name>");
         } else {
-            /* Get the client's IP from the source address */
             char client_ip[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &src->sin_addr, client_ip, sizeof(client_ip));
             
-            /* Check if the banned IPs file exists and contains this IP */
-            char filepath[512];  /* Increased buffer size */
+            char filepath[512];  
             snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", group_name);
             
             int is_banned = 0;
@@ -283,7 +268,6 @@ static void handle_command(ISYMessage *msg,
         }
     }
     else if (strcmp(cmd, "MERGE") == 0) {
-        /* Expected: MERGE <g1> <g2> - merge g1 members into g2, then delete g1 */
         char g1[64] = {0};
         char g2[64] = {0};
         sscanf(msg->texte, "%15s %63s %63s", cmd, g1, g2);
@@ -301,20 +285,18 @@ static void handle_command(ISYMessage *msg,
                 snprintf(reply.texte, MAX_TEXT,
                          "Les deux groupes doivent etre distincts: %s", g1);
             } else {
-                /* Permission: only the creator (moderateur) of BOTH groups may merge them */
+                
                 if (strcmp(msg->emetteur, groupes[idx1].moderateur) != 0 ||
                     strcmp(msg->emetteur, groupes[idx2].moderateur) != 0) {
                     snprintf(reply.texte, MAX_TEXT,
                              "Permission refusee: vous devez etre le createur (moderateur) des deux groupes pour fusionner");
-                    /* send immediate reply and return */
                     ssize_t ret = sendto(sock_srv, &reply, sizeof(reply), 0,
                            (struct sockaddr *)src, src_len);
                     if (ret < 0) perror("sendto reply");
                     return;
                 }
                 
-                /* Merge members of g1 into g2, avoiding duplicates by IP */
-                /* Strategy: append members from g1 to g2 if their IP doesn't already exist in g2 */
+                
                 typedef struct {
                     char username[MAX_USERNAME];
                     char ip[64];
@@ -324,9 +306,8 @@ static void handle_command(ISYMessage *msg,
                 MergedMember members_g2[512];
                 int count_g2 = 0;
                 
-                /* First, read all members from g2 (base group) */
                 {
-                    char filepath[512];  /* Increased buffer size */
+                    char filepath[512];  
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
                     FILE *f = fopen(filepath, "r");
                     if (f) {
@@ -346,9 +327,8 @@ static void handle_command(ISYMessage *msg,
                     }
                 }
                 
-                /* Now read g1 and add members that don't already exist in g2 (by IP) */
                 {
-                    char filepath[512];  /* Increased buffer size */
+                    char filepath[512];  
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
                     FILE *f = fopen(filepath, "r");
                     if (f) {
@@ -358,7 +338,6 @@ static void handle_command(ISYMessage *msg,
                             char ip[64];
                             char emoji[MAX_EMOJI];
                             if (sscanf(line, "%19[^:]:%63[^:]:%7s", username, ip, emoji) == 3) {
-                                /* Check if this IP already exists in g2 */
                                 int ip_exists = 0;
                                 for (int i = 0; i < count_g2; ++i) {
                                     if (strcmp(members_g2[i].ip, ip) == 0) {
@@ -366,7 +345,6 @@ static void handle_command(ISYMessage *msg,
                                         break;
                                     }
                                 }
-                                /* If IP not found in g2, add it */
                                 if (!ip_exists) {
                                     snprintf(members_g2[count_g2].username, MAX_USERNAME, "%s", username);
                                     snprintf(members_g2[count_g2].ip, 64, "%s", ip);
@@ -379,9 +357,8 @@ static void handle_command(ISYMessage *msg,
                     }
                 }
                 
-                /* Write updated g2 file with all members (g2 originals + new g1 members) */
                 {
-                    char filepath[512];  /* Increased buffer size */
+                    char filepath[512];  
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g2);
                     FILE *f = fopen(filepath, "w");
                     if (f) {
@@ -392,14 +369,12 @@ static void handle_command(ISYMessage *msg,
                     }
                 }
                 
-                /* Delete g1 file */
                 {
-                    char filepath[512];  /* Increased buffer size */
+                    char filepath[512];  
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", g1);
                     unlink(filepath);
                 }
                 
-                /* Notify g1 clients to migrate to g2 */
                 ISYMessage migr_msg;
                 memset(&migr_msg, 0, sizeof(migr_msg));
                 strcpy(migr_msg.ordre, ORDRE_MGR);
@@ -414,7 +389,6 @@ static void handle_command(ISYMessage *msg,
                                    (struct sockaddr *)&addr1, sizeof(addr1));
                 if (r < 0) perror("sendto migrate g1->g2");
                 
-                /* Kill and cleanup g1 */
                 if (groupes[idx1].pid > 0) {
                     pid_t pid1 = groupes[idx1].pid;
                     kill(pid1, SIGTERM);
@@ -440,9 +414,8 @@ static void handle_command(ISYMessage *msg,
                 groupes[idx1].shm_key = 0;
                 groupes[idx1].actif = 0;
                 
-                /* Clean up g1 ban file (g1.txt already deleted during merge) */
                 {
-                    char filepath[512];  /* Increased buffer size */
+                    char filepath[512];  
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", g1);
                     unlink(filepath);
                 }
@@ -474,12 +447,10 @@ static void handle_command(ISYMessage *msg,
                     groupes[idx].shm_id = 0;
                     groupes[idx].shm_key = 0;
                 }
-                /* Clean up the group info file */
                 {
-                    char filepath[512];  /* Increased buffer size */
+                    char filepath[512];  
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s.txt", arg1);
-                    unlink(filepath);  /* Delete the file, ignore errors */
-                    /* Also clean up the banned list file */
+                    unlink(filepath);  
                     snprintf(filepath, sizeof(filepath), "infoGroup/%s_banned.txt", arg1);
                     unlink(filepath);
                 }
@@ -490,7 +461,6 @@ static void handle_command(ISYMessage *msg,
                  "Commande inconnue: %s", cmd);
     }
     
-    /* Send reply back to client */
     ssize_t ret = sendto(sock_srv, &reply, sizeof(reply), 0,
                          (struct sockaddr *)src, src_len);
     if (ret < 0) {
@@ -506,7 +476,6 @@ int main(void)
 
     memset(groupes, 0, sizeof(groupes));
 
-    /* Reset the persistent group/member file on server start */
     {
         FILE *f = fopen("group_members.txt", "w");
         if (f) fclose(f);
@@ -515,21 +484,17 @@ int main(void)
     signal(SIGINT, handle_sigint);
 
     sock_srv = create_udp_socket();
-    /* Avoid child processes inheriting the server socket (use CLOEXEC) */
     int flags = fcntl(sock_srv, F_GETFD);
     if (flags != -1) fcntl(sock_srv, F_SETFD, flags | FD_CLOEXEC);
     fill_sockaddr(&addr_srv, NULL, SERVER_PORT);
     check_fatal(bind(sock_srv, (struct sockaddr *)&addr_srv, sizeof(addr_srv)) < 0, "bind serveur");
 
-    /* === SOCKET POUR LA DÉCOUVERTE AUTOMATIQUE === */
-    /* Broadcast discovery removed; server doesn't use broadcast any more. */
-    /* === FIN SOCKET POUR LA DÉCOUVERTE AUTOMATIQUE === */
+   
 
 
     printf("ServeurISY en écoute sur port %d\n", SERVER_PORT);
 
     while (running) {
-        /* Broadcast discovery removed; nothing to do here */
         printf("[SERVER] Waiting for message on port %d...\n", SERVER_PORT);
         fflush(stdout);
 
@@ -555,7 +520,7 @@ int main(void)
     }
 
     close(sock_srv);
-    cleanup_infogroup_files();  /* Clean up all group info files before shutting down */
+    cleanup_infogroup_files(); 
     printf("ServeurISY termine\n");
     return 0;
 }

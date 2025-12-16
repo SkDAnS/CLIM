@@ -16,19 +16,17 @@
 typedef struct {
     char username[MAX_USERNAME];
     char server_ip[64];
-    int  display_port;   /* port local pour AffichageISY */
+    int  display_port;   
 } ClientConfig;
 
 static ClientConfig cfg;
-static int sock_cli = -1;              /* socket UDP principal */
+static int sock_cli = -1;              
 static int shm_id   = -1;
 static ClientDisplayShm *shm_cli = NULL;
 static pid_t pid_affichage = -1;
-static char selected_sound[256] = "notif.wav";  /* son par défaut */
+static char selected_sound[256] = "notif.wav";  
 
-/* =======================================================================
- *  Chargement de la configuration client
- * ======================================================================= */
+/*  Chargement de la configuration client */
 static void load_config(const char *path)
 {
     FILE *f = fopen(path, "r");
@@ -65,19 +63,7 @@ static void load_config(const char *path)
     }
 }
 
-/* =======================================================================
- *  Découverte automatique du serveur via broadcast
- *  - Envoi:  "WHO_IS_SERVER?"
- *  - Réponse attendue: "SERVER_HERE:<ip>"
- *  Retourne 1 si trouvé, 0 sinon.
- * ======================================================================= */
-/* Discovery (broadcast) removed. The server IP must be provided in the config file.
- * This project explicitly disables broadcast-based discovery per request.
- */
-
-/* =======================================================================
- *  Gestion SHM & AffichageISY
- * ======================================================================= */
+/*  Gestion SHM & AffichageISY */
 static void init_shm_client(void)
 {
     shm_id = shmget(SHM_CLIENT_KEY, sizeof(ClientDisplayShm), IPC_CREAT | 0666);
@@ -117,20 +103,20 @@ static int find_executable_in_path(const char *name)
             return 1;
         dir = strtok(NULL, ":");
     }
-    /* Fallback: maybe name is an absolute path */
+   
     if (access(name, X_OK) == 0) return 1;
     return 0;
 }
 
-/* Safe copy helper: copy up to dstsize-1 and NUL-terminate. */
+
 static void safe_strncpy(char *dst, size_t dstsize, const char *src)
 {
     if (dstsize == 0) return;
-    /* Use snprintf with precision to avoid compiler truncation warnings */
+   
     snprintf(dst, dstsize, "%.*s", (int)(dstsize - 1), src ? src : "");
 }
 
-/* Portable millisecond sleep using nanosleep to avoid deprecated usleep warnings */
+
 static void sleep_ms(unsigned int ms)
 {
     struct timespec ts;
@@ -161,7 +147,7 @@ static const char *detect_terminal(void)
     return NULL;
 }
 
-/* (WSL detection removed) */
+
 
 /* Lance AffichageISY dans un processus fils */
 static pid_t start_affichage(void)
@@ -173,16 +159,7 @@ static pid_t start_affichage(void)
     check_fatal(pid < 0, "fork affichage");
 
     if (pid == 0) {
-        /* Fils → exécuter AffichageISY */
-        /*char port_str[16];
-        snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
-
-        execl("./bin/AffichageISY", "./bin/AffichageISY", port_str, cfg.username, (char *)NULL);
-        perror("execl AffichageISY");
-        _exit(EXIT_FAILURE);*/
-
-        // récupérer l'emplacement du dossier de projet
-
+        
         printf("entrer avant la recherche du dossier courant\n");
         
         char project_path[512];
@@ -194,19 +171,14 @@ static pid_t start_affichage(void)
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", cfg.display_port);
 
-          /* Construire la commande simple qui lance AffichageISY dans le répertoire projet.
-              Prefixer des variables d'environnement pour forcer un rendu logiciel (éviter ZINK/MESA errors)
-              et rediriger stderr vers /dev/null pour supprimer les warnings libEGL/mesa qui apparaissent
-              sur certaines machines sans GPU/D-Bus disponible. Si vous préférez voir les erreurs,
-              retirez la redirection `2>/dev/null` et/ou l'une des variables d'environnement. */
+        
           char cmd[1024];
           snprintf(cmd, sizeof(cmd), "cd '%s' && MESA_LOADER_DRIVER_OVERRIDE=swrast LIBGL_ALWAYS_SOFTWARE=1 ./bin/AffichageISY %s %s 2>/dev/null", project_path, port_str, cfg.username);
 
-        /* Make the child the leader of a new session so we can signal the whole
-           process group (the terminal and its children) from the parent. */
+       
         if (setsid() < 0) {
             perror("setsid");
-            /* continue anyway */
+            
         }
 
         /* Détecter un terminal disponible et l'utiliser pour ouvrir une nouvelle fenêtre */
@@ -218,13 +190,11 @@ static pid_t start_affichage(void)
 
         /* Debug: afficher le terminal choisi */
         printf("[DEBUG] Terminal détecté: %s\n", term ? term : "aucun");
-        /* Ensure child inherits a UTF-8 locale so emoji bytes render correctly when the terminal/font supports them. */
-        /* Note: the system must actually have the locale generated (eg. en_US.UTF-8); if not, set it system-wide or generate it. */
+        
         setenv("LANG", "en_US.UTF-8", 0);
         setenv("LC_ALL", "en_US.UTF-8", 0);
 
-        /* Allow user to override which X display to use when launching AffichageISY.
-           Useful when the default DISPLAY isn't set or when running under WSL/remote sessions. */
+        
         const char *aff_display = getenv("AFF_DISPLAY");
         if (aff_display && aff_display[0] != '\0') {
             setenv("DISPLAY", aff_display, 1);
@@ -233,10 +203,10 @@ static pid_t start_affichage(void)
         if (strcmp(term, "gnome-terminal") == 0) {
             execlp("gnome-terminal", "gnome-terminal", "--", "bash", "-c", cmd, (char *)NULL);
         } else if (strcmp(term, "xterm") == 0) {
-            /* xterm needs -u8 to enable UTF-8 mode on some builds; also allow the user to set a font via X resources if needed */
+           
             execlp("xterm", "xterm", "-u8", "-e", "bash", "-c", cmd, (char *)NULL);
         } else {
-            /* Most terminals accept -e to execute a command in a new window */
+            
             execlp(term, term, "-e", "bash", "-c", cmd, (char *)NULL);
         }
 
@@ -245,10 +215,7 @@ static pid_t start_affichage(void)
         _exit(EXIT_FAILURE);
     }
 
-    /* Parent: pid contient le PID du processus forké (terminal enfant).
-       On conserve le PID du child dans `pid_affichage` et on s'appuiera
-       sur waitpid() / kill() pour fermer la fenêtre si nécessaire. */
-
+    
     return pid;
 }
 
@@ -263,35 +230,25 @@ static void stop_affichage(void)
         if (kill(g, SIGTERM) < 0) {
             perror("stop_affichage: kill(SIGTERM)");
         } else {
-            /* wait up to ~1s for child to exit */
             int waited = 0;
             while (waited < 100) {
                 int status;
                 pid_t r = waitpid(pid_affichage, &status, WNOHANG);
                 if (r == pid_affichage) break;
-                sleep_ms(10); /* 10ms */
+                sleep_ms(10); 
                 waited += 1;
             }
         }
-        /* if still alive, force kill */
         if (kill(g, 0) == 0) {
             if (kill(g, SIGKILL) < 0)
                 perror("stop_affichage: kill(SIGKILL)");
         }
-        /* reap child */
         waitpid(pid_affichage, NULL, 0);
         pid_affichage = -1;
     }
-    /* No pidfile to clean up in this simplified mode */
 }
 
-/* =======================================================================
- *  Envoi de commande au serveur (JOIN, CREATE, LIST, ...)
- *  - cmd : ex "JOIN isen"
- *  - reply_buf : buffer texte lisible ("OK ...", "ERR ...")
- *  - port_groupe_opt : si non NULL et que la réponse est "OK <port>",
- *                      renseigne le port du groupe.
- * ======================================================================= */
+
 static void send_command_to_server(const char *cmd,
                                    char *reply_buf, size_t reply_sz,
                                    char *group_name_opt,
@@ -304,7 +261,6 @@ static void send_command_to_server(const char *cmd,
     memset(&msg, 0, sizeof(msg));
     strcpy(msg.ordre, ORDRE_CMD);
     snprintf(msg.emetteur, MAX_USERNAME, "%s", cfg.username);
-    /* Assign a deterministic emoji for this user */
     choose_emoji_from_username(cfg.username, msg.emoji);
     msg.emetteur[MAX_USERNAME - 1] = '\0';
     snprintf(msg.texte, MAX_TEXT, "%s", cmd);
@@ -315,9 +271,8 @@ static void send_command_to_server(const char *cmd,
     struct sockaddr_in from;
     socklen_t len = sizeof(from);
     ISYMessage reply;
-    /* Add a timeout and retry logic to handle the server starting after the client. */
     struct timeval tv;
-    tv.tv_sec = 1; /* per-attempt timeout */
+    tv.tv_sec = 1; 
     tv.tv_usec = 0;
     setsockopt(sock_cli, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -329,24 +284,23 @@ static void send_command_to_server(const char *cmd,
                               (struct sockaddr *)&addr_srv, sizeof(addr_srv));
         if (sent < 0) {
             perror("sendto serveur");
-            /* try again after a short pause */
             sleep_ms(200);
             continue;
         }
 
         n = recvfrom(sock_cli, &reply, sizeof(reply), 0,
                      (struct sockaddr *)&from, &len);
-        if (n >= 0) break; /* success */
+        if (n >= 0) break; 
 
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            /* no response yet */
+            
             if (attempt < max_retries - 1) {
                 printf("[CLIENT] Aucun reponse du serveur, tentative %d/%d...\n", attempt + 1, max_retries);
                 fflush(stdout);
                 sleep_ms(200);
                 continue;
             } else {
-                /* final attempt failed */
+                
                 snprintf(reply_buf, reply_sz, "Aucun reponse du serveur (timeout)");
                 if (port_groupe_opt) *port_groupe_opt = -1;
                 if (group_name_opt) group_name_opt[0] = '\0';
@@ -354,7 +308,6 @@ static void send_command_to_server(const char *cmd,
             }
         }
 
-        /* other recv errors are fatal */
         check_fatal(n < 0, "recvfrom serveur");
     }
     printf("[CLIENT] Received reply: %s\n", reply.texte);
@@ -372,7 +325,6 @@ static void send_command_to_server(const char *cmd,
     }
 
     if (group_name_opt) {
-        /* set empty if no group name in reply */
         if (reply.groupe[0] == '\0')
             group_name_opt[0] = '\0';
         else
@@ -380,9 +332,6 @@ static void send_command_to_server(const char *cmd,
     }
 }
 
-/* =======================================================================
- *  Envoi du CON au GroupeISY pour s’enregistrer comme membre
- * ======================================================================= */
 static void connect_to_group(const char *group_name, int port_groupe)
 {
     struct sockaddr_in addr_grp;
@@ -402,9 +351,7 @@ static void connect_to_group(const char *group_name, int port_groupe)
     check_fatal(n < 0, "sendto groupe CON");
 }
 
-/* =======================================================================
- *  Envoi d’un message MES au GroupeISY
- * ======================================================================= */
+/*  Envoi d’un message MES au GroupeISY */
 static void send_message_to_group(const char *group_name,
                                   int port_groupe,
                                   const char *texte)
@@ -418,7 +365,6 @@ static void send_message_to_group(const char *group_name,
     safe_strncpy(msg.emetteur, MAX_USERNAME, cfg.username);
     choose_emoji_from_username(cfg.username, msg.emoji);
     safe_strncpy(msg.groupe, MAX_GROUP_NAME, group_name);
-    /* copy texte safely with truncation */
     snprintf(msg.texte, MAX_TEXT, "%.*s", (int)MAX_TEXT - 1, texte ? texte : "");
 
     ssize_t n = sendto(sock_cli, &msg, sizeof(msg), 0,
@@ -426,16 +372,12 @@ static void send_message_to_group(const char *group_name,
     check_fatal(n < 0, "sendto groupe MES");
 }
 
-/* =======================================================================
- *  Programme principal
- * ======================================================================= */
+/*Programme principal */
 int main(void)
 {
     char nomsSons[MAX_SONS][MAX_NOM];
     listerSons(nomsSons);
-    // Mettre le son 1 par défaut
     safe_strncpy(selected_sound, sizeof(selected_sound), nomsSons[0]);
-    /* Mettre à jour le SHM pour que AffichageISY utilise ce son */
     if (shm_cli) {
         strncpy(shm_cli->sound_name, selected_sound, sizeof(shm_cli->sound_name) - 1);
         shm_cli->sound_name[sizeof(shm_cli->sound_name) - 1] = '\0';
@@ -443,20 +385,17 @@ int main(void)
 
     load_config("config/client_template.conf");
 
-    /* No broadcast discovery in this project; server_ip must be in config */
     printf("Serveur utilisé (config): %s\n", cfg.server_ip);
 
     printf("ClientISY – utilisateur=%s, serveur=%s, port_affichage=%d\n",
            cfg.username, cfg.server_ip, cfg.display_port);
 
     sock_cli = create_udp_socket();
-    /* avoid child processes inheriting client socket */
     int flags_cli = fcntl(sock_cli, F_GETFD);
     if (flags_cli != -1) fcntl(sock_cli, F_SETFD, flags_cli | FD_CLOEXEC);
 
     int running = 1;
     while (running) {
-        /* Check for migration notifications from Affichage via SHM */
         if (shm_cli && shm_cli->notify_flag) {
             char notif[MAX_TEXT];
             snprintf(notif, sizeof(notif), "%s", shm_cli->notify);
@@ -466,7 +405,6 @@ int main(void)
             if (sscanf(notif, "MIGRATE %31s %d", newname, &newport) == 2) {
                 printf("[AUTOJOIN] Migration notice: %s -> %d\n", newname, newport);
                 fflush(stdout);
-                /* try to JOIN via server to get current port, prefer server reply */
                 char joincmd[128];
                 snprintf(joincmd, sizeof(joincmd), "JOIN %s", newname);
                 char reply[256]; int port_g = -1;
@@ -498,7 +436,6 @@ int main(void)
         int choice = atoi(buffer);
 
         if (choice == 0) {
-            /* Allow the main loop to exit normally so cleanup runs */
             running = 0;
             break;
         }
@@ -519,9 +456,7 @@ int main(void)
 
             printf("Réponse serveur : %s\n", reply);
 
-            /* Check if banned before trying to connect */
             if (port_groupe > 0) {
-                /* First check if this client is banned from the group */
                 char checkban_cmd[128];
                 snprintf(checkban_cmd, sizeof(checkban_cmd), "CHECKBAN %s", group_name);
                 
@@ -530,7 +465,7 @@ int main(void)
                 
                 if (strncmp(ban_reply, "BANNED", 6) == 0) {
                     printf("\n❌ ERREUR: Vous avez été banni de ce groupe et ne pouvez pas le rejoindre.\n\n");
-                    continue;  /* Go back to menu */
+                    continue; 
                 }
                 
                 if (pid_affichage <= 0) {
@@ -542,11 +477,9 @@ int main(void)
                 printf("Entrez vos messages (\"quit\" pour revenir au menu) :\n");
                 
                 while (1) {
-                    /* Check every 100ms if display process is still running */
                     int status;
                     pid_t r = waitpid(pid_affichage, &status, WNOHANG);
                     if (r == pid_affichage) {
-                        /* Display process exited */
                         if (shm_cli && shm_cli->running == 0) {
                             printf("\n🚫 VOUS AVEZ ÉTÉ BANNI DE CE GROUPE!\n");
                             printf("Retour au menu principal...\n\n");
@@ -555,13 +488,12 @@ int main(void)
                         break;
                     }
                     
-                    /* Use select() to wait for stdin with timeout */
                     fd_set readfds;
                     struct timeval tv;
                     FD_ZERO(&readfds);
                     FD_SET(STDIN_FILENO, &readfds);
                     tv.tv_sec = 0;
-                    tv.tv_usec = 100000;  /* 100ms timeout */
+                    tv.tv_usec = 100000;  
                     
                     int sel = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
                     
@@ -571,11 +503,9 @@ int main(void)
                     }
                     
                     if (sel == 0) {
-                        /* Timeout - loop back to check process status */
                         continue;
                     }
                     
-                    /* stdin is ready */
                     printf("> ");
                     fflush(stdout);
                     if (!fgets(buffer, sizeof(buffer), stdin))
@@ -583,28 +513,24 @@ int main(void)
                     buffer[strcspn(buffer, "\n")] = '\0';
 
                     if (strcmp(buffer, "quit") == 0){
-                        /* Terminate the terminal child; try graceful then force */
                         if (pid_affichage > 0) {
                             pid_t g = -pid_affichage;
                             if (kill(g, SIGTERM) < 0) {
                                 perror("kill(SIGTERM) failed");
                             } else {
-                                /* give it a short moment to exit */
                                 int waited = 0;
                                 while (waited < 100) {
                                     int status;
                                     pid_t r = waitpid(pid_affichage, &status, WNOHANG);
                                     if (r == pid_affichage) break;
-                                    sleep_ms(10); /* 10ms */
+                                    sleep_ms(10); 
                                     waited += 1;
                                 }
                             }
-                            /* if still alive, force kill */
                             if (kill(g, 0) == 0) {
                                 if (kill(g, SIGKILL) < 0)
                                     perror("kill(SIGKILL) failed");
                             }
-                            /* reap child */
                             waitpid(pid_affichage, NULL, 0);
                             pid_affichage = -1;
                         }
@@ -646,11 +572,9 @@ int main(void)
             printf("Nom du second groupe destinataire : ");
             if (!fgets(g2, sizeof(g2), stdin)) continue;
             g2[strcspn(g2, "\n")] = '\0';
-            //printf("Nom du nouveau groupe : ");
-            //if (!fgets(newname, sizeof(newname), stdin)) continue;
+           
             newname[strcspn(newname, "\n")] = '\0';
 
-            /* Stop AffichageISY before merging so we don't receive messages from old groups */
             stop_affichage();
 
             char cmd[256];
